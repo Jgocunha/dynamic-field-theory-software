@@ -1,0 +1,679 @@
+"""
+Generate all 600 simulation files for the cross-framework algebraic equivalence test suite.
+
+Outputs (relative to this script's directory):
+  simulations/cosivina/sim_NNN.m          (100 files)
+  simulations/dnfc/sim_NNN_abssigmoid_b100.json   (100)
+  simulations/dnfc/sim_NNN_heaviside.json          (100)
+  simulations/dnfc/sim_NNN_sigmoid_b100.json       (100)
+  simulations/cedar/sim_NNN_abssigmoid_b100.json   (100)
+  simulations/cedar/sim_NNN_heaviside.json          (100)
+
+Total: 600 files.
+"""
+
+import json
+import os
+from pathlib import Path
+
+ROOT = Path(__file__).parent
+
+# ---------------------------------------------------------------------------
+# Parameter table
+# ---------------------------------------------------------------------------
+
+# Each sim is a dict with keys:
+#   id (str "001".."100"), type (str), h, tau=25, field_size=100
+#   stimuli: list of dicts {amp, sigma, pos}
+#   kernel: dict — one of:
+#     {"type":"gauss", "sigma":, "amp":, "amp_global":}
+#     {"type":"mexican_hat", "sigma_exc":, "amp_exc":, "sigma_inh":, "amp_inh":}
+
+SIMS = []
+
+# ── Detection (001–020) ─────────────────────────────────────────────────────
+det_params = [
+    # h,     stim_amp, stim_sigma, stim_pos, k_amp, k_sigma
+    (-8.0,  12.0, 5, 50, 8.0, 3),
+    (-8.0,  10.0, 5, 50, 8.0, 3),
+    (-8.0,  14.0, 5, 50, 8.0, 3),
+    (-9.0,  12.0, 5, 50, 8.0, 3),
+    (-7.0,  12.0, 5, 50, 8.0, 3),
+    (-8.0,  12.0, 3, 50, 8.0, 3),
+    (-8.0,  12.0, 7, 50, 8.0, 3),
+    (-8.0,  12.0, 5, 25, 8.0, 3),
+    (-8.0,  12.0, 5, 75, 8.0, 3),
+    (-8.0,  12.0, 5, 50, 6.0, 3),
+    (-8.0,  12.0, 5, 50, 10.0, 3),
+    (-8.0,  12.0, 5, 50, 8.0, 2),
+    (-8.0,  12.0, 5, 50, 8.0, 4),
+    (-8.0,  12.0, 5, 50, 8.0, 5),
+    (-9.0,  14.0, 5, 50, 8.0, 3),
+    (-7.0,  10.0, 5, 50, 8.0, 3),
+    (-8.0,  12.0, 5, 33, 8.0, 3),
+    (-8.0,  12.0, 5, 67, 8.0, 3),
+    (-8.0,  15.0, 4, 50, 7.0, 4),
+    (-10.0, 16.0, 6, 50, 9.0, 3),
+]
+for i, (h, sa, ss, sp, ka, ks) in enumerate(det_params, 1):
+    SIMS.append({"id": f"{i:03d}", "type": "detection", "h": h,
+                 "stimuli": [{"amp": sa, "sigma": ss, "pos": sp}],
+                 "kernel": {"type": "gauss", "sigma": ks, "amp": ka, "amp_global": 0.0}})
+
+# ── Selection (021–040) ─────────────────────────────────────────────────────
+sel_params = [
+    # h,     s1_amp, s1_pos, s2_amp, s2_pos, k_amp, k_sigma, amp_global
+    (-10.0, 10.0, 25, 10.5, 75, 5.0, 3, -0.15),
+    (-10.0, 10.0, 25, 11.0, 75, 5.0, 3, -0.15),
+    (-10.0, 12.0, 25, 12.5, 75, 5.0, 3, -0.15),
+    (-10.0, 10.0, 30, 10.5, 70, 5.0, 3, -0.15),
+    (-10.0, 10.0, 20, 10.5, 80, 5.0, 3, -0.15),
+    (-11.0, 11.0, 25, 11.5, 75, 5.0, 3, -0.15),
+    (-9.0,  10.0, 25, 10.5, 75, 5.0, 3, -0.15),
+    (-10.0, 10.0, 25, 10.5, 75, 6.0, 3, -0.15),
+    (-10.0, 10.0, 25, 10.5, 75, 5.0, 4, -0.15),
+    (-10.0, 10.0, 25, 10.5, 75, 5.0, 3, -0.20),
+    (-10.0, 10.0, 25, 10.5, 75, 5.0, 3, -0.10),
+    (-10.0,  8.0, 25,  8.5, 75, 5.0, 3, -0.15),
+    (-10.0, 14.0, 25, 14.5, 75, 5.0, 3, -0.15),
+    (-10.0, 10.0, 25, 10.5, 50, 5.0, 3, -0.15),
+    (-10.0, 10.0, 33, 10.5, 67, 5.0, 3, -0.15),
+    (-10.0, 10.0, 25, 10.5, 75, 4.0, 3, -0.15),
+    (-12.0, 13.0, 25, 13.5, 75, 5.0, 3, -0.15),
+    (-10.0, 10.0, 25, 10.5, 75, 5.0, 2, -0.15),
+    (-10.0, 10.0, 25, 10.5, 75, 7.0, 4, -0.20),
+    (-10.0, 10.0, 25, 12.0, 75, 5.0, 3, -0.15),
+]
+for i, (h, s1a, s1p, s2a, s2p, ka, ks, ag) in enumerate(sel_params, 21):
+    SIMS.append({"id": f"{i:03d}", "type": "selection", "h": h,
+                 "stimuli": [{"amp": s1a, "sigma": 5, "pos": s1p},
+                             {"amp": s2a, "sigma": 5, "pos": s2p}],
+                 "kernel": {"type": "gauss", "sigma": ks, "amp": ka, "amp_global": ag}})
+
+# ── Memory (041–060) ────────────────────────────────────────────────────────
+mem_params = [
+    # h,    stim_amp, stim_pos, sigma_exc, amp_exc, sigma_inh, amp_inh
+    (-5.0, 15.0, 50, 3.4, 17.7, 8.9, 13.5),
+    (-5.0, 12.0, 50, 3.4, 17.7, 8.9, 13.5),
+    (-5.0, 18.0, 50, 3.4, 17.7, 8.9, 13.5),
+    (-6.0, 15.0, 50, 3.4, 17.7, 8.9, 13.5),
+    (-4.0, 15.0, 50, 3.4, 17.7, 8.9, 13.5),
+    (-5.0, 15.0, 25, 3.4, 17.7, 8.9, 13.5),
+    (-5.0, 15.0, 75, 3.4, 17.7, 8.9, 13.5),
+    (-5.0, 15.0, 50, 3.0, 17.7, 8.9, 13.5),
+    (-5.0, 15.0, 50, 4.0, 17.7, 8.9, 13.5),
+    (-5.0, 15.0, 50, 3.4, 15.0, 8.9, 13.5),
+    (-5.0, 15.0, 50, 3.4, 20.0, 8.9, 13.5),
+    (-5.0, 15.0, 50, 3.4, 17.7, 7.0, 13.5),
+    (-5.0, 15.0, 50, 3.4, 17.7,10.0, 13.5),
+    (-5.0, 15.0, 50, 3.4, 17.7, 8.9, 11.0),
+    (-5.0, 15.0, 50, 3.4, 17.7, 8.9, 16.0),
+    (-5.0, 15.0, 33, 3.4, 17.7, 8.9, 13.5),
+    (-5.0, 15.0, 67, 3.4, 17.7, 8.9, 13.5),
+    (-6.0, 18.0, 50, 3.4, 17.7, 8.9, 13.5),
+    (-4.0, 12.0, 50, 4.0, 20.0, 8.9, 13.5),
+    (-5.0, 15.0, 50, 3.0, 16.0, 9.5, 14.0),
+]
+for i, (h, sa, sp, se, ae, si, ai) in enumerate(mem_params, 41):
+    SIMS.append({"id": f"{i:03d}", "type": "memory", "h": h,
+                 "stimuli": [{"amp": sa, "sigma": 5, "pos": sp}],
+                 "kernel": {"type": "mexican_hat", "sigma_exc": se, "amp_exc": ae,
+                            "sigma_inh": si, "amp_inh": ai}})
+
+# ── Insufficient activation (061–080) ───────────────────────────────────────
+ins_params = [
+    (-12.0, 5.0, 5, 50, 3.0, 3),
+    (-12.0, 4.0, 5, 50, 3.0, 3),
+    (-12.0, 6.0, 5, 50, 3.0, 3),
+    (-14.0, 5.0, 5, 50, 3.0, 3),
+    (-10.0, 5.0, 5, 50, 3.0, 3),
+    (-12.0, 5.0, 3, 50, 3.0, 3),
+    (-12.0, 5.0, 7, 50, 3.0, 3),
+    (-12.0, 5.0, 5, 25, 3.0, 3),
+    (-12.0, 5.0, 5, 75, 3.0, 3),
+    (-12.0, 5.0, 5, 50, 2.0, 3),
+    (-12.0, 5.0, 5, 50, 4.0, 3),
+    (-12.0, 5.0, 5, 50, 3.0, 2),
+    (-12.0, 5.0, 5, 50, 3.0, 4),
+    (-15.0, 7.0, 5, 50, 3.0, 3),
+    (-12.0, 3.0, 5, 50, 3.0, 3),
+    (-12.0, 5.0, 5, 50, 1.0, 3),
+    (-12.0, 5.0, 5, 33, 3.0, 3),
+    (-12.0, 5.0, 5, 67, 3.0, 3),
+    (-11.0, 6.0, 4, 50, 4.0, 3),
+    (-13.0, 7.0, 6, 50, 3.5, 3),
+]
+for i, (h, sa, ss, sp, ka, ks) in enumerate(ins_params, 61):
+    SIMS.append({"id": f"{i:03d}", "type": "insufficient", "h": h,
+                 "stimuli": [{"amp": sa, "sigma": ss, "pos": sp}],
+                 "kernel": {"type": "gauss", "sigma": ks, "amp": ka, "amp_global": 0.0}})
+
+# ── Multi-peak (081–100) ─────────────────────────────────────────────────────
+multi_params = [
+    # n, h,    stimuli [(amp,pos,sig)...],                         k_amp, k_sig, ag
+    (2, -8.0, [(12,25,5),(12,75,5)],                               5.0, 2, 0.0),
+    (2, -8.0, [(12,25,5),(12,75,5)],                               4.0, 2, 0.0),
+    (2, -8.0, [(12,25,5),(12,75,5)],                               3.0, 1, 0.0),
+    (2, -8.0, [(12,20,5),(12,80,5)],                               5.0, 2, 0.0),
+    (2, -8.0, [(12,30,5),(12,70,5)],                               5.0, 2, 0.0),
+    (3, -8.0, [(12,20,5),(12,50,5),(12,80,5)],                     5.0, 2, 0.0),
+    (3, -8.0, [(10,20,5),(12,50,5),(10,80,5)],                     4.0, 2, 0.0),
+    (2, -7.0, [(12,25,5),(12,75,5)],                               5.0, 2, 0.0),
+    (2, -9.0, [(14,25,5),(14,75,5)],                               5.0, 2, 0.0),
+    (2, -8.0, [(12,25,4),(12,75,4)],                               5.0, 2, 0.0),
+    (2, -8.0, [(12,25,6),(12,75,6)],                               5.0, 2, 0.0),
+    (2, -8.0, [(12,25,5),(12,75,5)],                               6.0, 2, 0.0),
+    (2, -8.0, [(12,25,5),(12,75,5)],                               5.0, 3, 0.0),
+    (2, -8.0, [(12,25,5),(14,75,5)],                               5.0, 2, 0.0),
+    (3, -8.0, [(12,17,4),(12,50,4),(12,83,4)],                     4.0, 2, 0.0),
+    (2, -8.0, [(12,25,5),(12,75,5)],                               5.0, 2, -0.05),
+    (2, -8.0, [(15,25,5),(15,75,5)],                               5.0, 2, 0.0),
+    (3, -8.0, [(10,25,5),(10,50,5),(10,75,5)],                     4.0, 2, 0.0),
+    (2, -8.0, [(12,25,5),(12,75,5)],                               7.0, 3, 0.0),
+    (2, -8.0, [(12,25,3),(12,75,3)],                               5.0, 2, 0.0),
+]
+for i, (n, h, stims, ka, ks, ag) in enumerate(multi_params, 81):
+    SIMS.append({"id": f"{i:03d}", "type": "multi_peak", "h": h,
+                 "stimuli": [{"amp": a, "sigma": s, "pos": p} for a, p, s in stims],
+                 "kernel": {"type": "gauss", "sigma": ks, "amp": ka, "amp_global": ag}})
+
+assert len(SIMS) == 100, f"Expected 100 sims, got {len(SIMS)}"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+COSIVINA_DIR = ROOT / "simulations" / "cosivina"
+DNFC_DIR     = ROOT / "simulations" / "dnfc"
+CEDAR_DIR    = ROOT / "simulations" / "cedar"
+
+
+def dnfc_act_fn(name: str) -> dict:
+    if name == "abssigmoid_b100":
+        return {"type": "abs_sigmoid", "beta": 100.0, "x_shift": 0.0}
+    if name == "heaviside":
+        return {"type": "heaviside", "x_shift": 0.0}
+    if name == "sigmoid_b100":
+        return {"type": "sigmoid", "steepness": 100.0, "x_shift": 0.0}
+    raise ValueError(name)
+
+
+def cedar_sigmoid(name: str) -> dict:
+    if name == "abssigmoid_b100":
+        return {"type": "cedar.aux.math.AbsSigmoid", "threshold": "0", "beta": "100"}
+    if name == "heaviside":
+        return {"type": "cedar.aux.math.HeavisideSigmoid", "threshold": "0"}
+    raise ValueError(name)
+
+
+# ---------------------------------------------------------------------------
+# dnfc JSON generator
+# ---------------------------------------------------------------------------
+
+def build_dnfc_json(sim: dict, act_fn: str) -> dict:
+    sid = sim["id"]
+    stype = sim["type"]
+    k = sim["kernel"]
+
+    elements = []
+
+    # Neural field
+    elements.append({
+        "uniqueName": "neural field u",
+        "label": [1, "neural field"],
+        "tau": 25.0,
+        "restingLevel": sim["h"],
+        "activationFunction": dnfc_act_fn(act_fn),
+        "x_max": 100,
+        "d_x": 1.0,
+        "inputs": (
+            [["gauss kernel", "output"]] if k["type"] == "gauss" else [["mexican hat kernel", "output"]]
+        ) + [[f"gauss stimulus {i+1}", "output"] for i in range(len(sim["stimuli"]))]
+    })
+
+    # Stimuli
+    for i, st in enumerate(sim["stimuli"]):
+        name = f"gauss stimulus {i+1}" if len(sim["stimuli"]) > 1 else "gauss stimulus"
+        # Fix inputs reference above for single stimulus
+        elements[-1]["inputs"] = (
+            [["gauss kernel", "output"]] if k["type"] == "gauss" else [["mexican hat kernel", "output"]]
+        ) + [[f"gauss stimulus {j+1}" if len(sim["stimuli"]) > 1 else "gauss stimulus", "output"]
+             for j in range(len(sim["stimuli"]))]
+
+        elements.append({
+            "uniqueName": name,
+            "label": [2, "gauss stimulus"],
+            "amplitude": float(st["amp"]),
+            "width": float(st["sigma"]),
+            "position": float(st["pos"]),
+            "circular": True,
+            "normalized": False,
+            "x_max": 100,
+            "d_x": 1.0,
+            "inputs": None
+        })
+
+    # Kernel
+    if k["type"] == "gauss":
+        elements.append({
+            "uniqueName": "gauss kernel",
+            "label": [4, "gauss kernel"],
+            "amplitude": float(k["amp"]),
+            "amplitudeGlobal": float(k["amp_global"]),
+            "width": float(k["sigma"]),
+            "circular": True,
+            "normalized": True,
+            "x_max": 100,
+            "d_x": 1.0,
+            "inputs": [["neural field u", "output"]]
+        })
+    else:  # mexican_hat
+        elements.append({
+            "uniqueName": "mexican hat kernel",
+            "label": [5, "mexican hat kernel"],
+            "amplitudeExc": float(k["amp_exc"]),
+            "widthExc": float(k["sigma_exc"]),
+            "amplitudeInh": float(k["amp_inh"]),
+            "widthInh": float(k["sigma_inh"]),
+            "amplitudeGlobal": 0.0,
+            "circular": True,
+            "normalized": True,
+            "x_max": 100,
+            "d_x": 1.0,
+            "inputs": [["neural field u", "output"]]
+        })
+
+    return {
+        "identifier": f"sim-{sid}-{stype}-{act_fn}",
+        "deltaT": 25.0,
+        "elements": elements
+    }
+
+
+# Fix the NF inputs construction (cleaner rewrite):
+def build_dnfc_json_v2(sim: dict, act_fn: str) -> dict:
+    sid = sim["id"]
+    stype = sim["type"]
+    k = sim["kernel"]
+    n_stim = len(sim["stimuli"])
+
+    # stimulus unique names
+    stim_names = [f"gauss stimulus {i+1}" if n_stim > 1 else "gauss stimulus"
+                  for i in range(n_stim)]
+
+    kernel_name = "gauss kernel" if k["type"] == "gauss" else "mexican hat kernel"
+
+    # NF inputs: kernel + all stimuli
+    nf_inputs = [[kernel_name, "output"]] + [[s, "output"] for s in stim_names]
+
+    elements = []
+
+    # Neural field
+    elements.append({
+        "uniqueName": "neural field u",
+        "label": [1, "neural field"],
+        "tau": 25.0,
+        "restingLevel": float(sim["h"]),
+        "activationFunction": dnfc_act_fn(act_fn),
+        "x_max": 100,
+        "d_x": 1.0,
+        "inputs": nf_inputs
+    })
+
+    # Stimuli
+    for name, st in zip(stim_names, sim["stimuli"]):
+        elements.append({
+            "uniqueName": name,
+            "label": [2, "gauss stimulus"],
+            "amplitude": float(st["amp"]),
+            "width": float(st["sigma"]),
+            "position": float(st["pos"]),
+            "circular": True,
+            "normalized": False,
+            "x_max": 100,
+            "d_x": 1.0,
+            "inputs": None
+        })
+
+    # Kernel
+    if k["type"] == "gauss":
+        elements.append({
+            "uniqueName": "gauss kernel",
+            "label": [4, "gauss kernel"],
+            "amplitude": float(k["amp"]),
+            "amplitudeGlobal": float(k["amp_global"]),
+            "width": float(k["sigma"]),
+            "circular": True,
+            "normalized": True,
+            "x_max": 100,
+            "d_x": 1.0,
+            "inputs": [["neural field u", "output"]]
+        })
+    else:
+        elements.append({
+            "uniqueName": "mexican hat kernel",
+            "label": [5, "mexican hat kernel"],
+            "amplitudeExc": float(k["amp_exc"]),
+            "widthExc": float(k["sigma_exc"]),
+            "amplitudeInh": float(k["amp_inh"]),
+            "widthInh": float(k["sigma_inh"]),
+            "amplitudeGlobal": 0.0,
+            "circular": True,
+            "normalized": True,
+            "x_max": 100,
+            "d_x": 1.0,
+            "inputs": [["neural field u", "output"]]
+        })
+
+    return {
+        "identifier": f"sim-{sid}-{stype}-{act_fn}",
+        "deltaT": 25.0,
+        "elements": elements
+    }
+
+
+# ---------------------------------------------------------------------------
+# Cedar JSON generator
+# ---------------------------------------------------------------------------
+
+# Cedar JSON uses string values for numbers.
+# For multi-stimulus: two GaussInput steps with different "name" fields.
+# For memory: two Gauss kernel entries with duplicate keys (Cedar-specific).
+
+CEDAR_BOILERPLATE_TAIL = """
+    "triggers": {
+        "cedar.processing.LoopedTrigger": {
+            "name": "LoopedTrigger",
+            "fake euler step": "false",
+            "loop mode": "0",
+            "step size": "1",
+            "Steps": {
+                "cedar.dynamics.NeuralField": {}
+            }
+        }
+    },
+    "connections": [
+        {"source": "Gauss Input.output", "target": "Neural Field.input"},
+        {"source": "Neural Field.lateral output", "target": "Neural Field.input"}
+    ],
+    "records": {},
+    "ui": {},
+    "ui view": {},
+    "ui generic": {}
+"""
+
+
+def build_cedar_json_str(sim: dict, act_fn: str) -> str:
+    """Return a Cedar JSON string. Built as a string because Cedar uses duplicate keys."""
+    k = sim["kernel"]
+    n_stim = len(sim["stimuli"])
+    sig_block = json.dumps(cedar_sigmoid(act_fn))
+
+    # Build GaussInput steps block
+    gauss_inputs = ""
+    for i, st in enumerate(sim["stimuli"]):
+        name = f"Gauss Input {i+1}" if n_stim > 1 else "Gauss Input"
+        gauss_inputs += f"""
+        "cedar.processing.sources.GaussInput": {{
+            "name": "{name}",
+            "dimensionality": "1",
+            "sizes": ["100"],
+            "amplitude": "{st['amp']}",
+            "centers": ["{st['pos']}"],
+            "sigma": ["{st['sigma']}"],
+            "cyclic": "true",
+            "comments": ""
+        }},"""
+
+    # Build lateral kernels block
+    if k["type"] == "gauss":
+        lateral_kernels = f"""{{
+                "cedar.aux.kernel.Gauss": {{
+                    "dimensionality": "1",
+                    "anchor": ["0"],
+                    "amplitude": "{k['amp']}",
+                    "sigmas": ["{k['sigma']}"],
+                    "normalize": "true",
+                    "shifts": ["0"],
+                    "limit": "10"
+                }}
+            }}"""
+    else:
+        # Two Gauss entries (duplicate key — Cedar-specific)
+        lateral_kernels = f"""{{
+                "cedar.aux.kernel.Gauss": {{
+                    "dimensionality": "1",
+                    "anchor": ["0"],
+                    "amplitude": "{k['amp_exc']}",
+                    "sigmas": ["{k['sigma_exc']}"],
+                    "normalize": "true",
+                    "shifts": ["0"],
+                    "limit": "10"
+                }},
+                "cedar.aux.kernel.Gauss": {{
+                    "dimensionality": "1",
+                    "anchor": ["0"],
+                    "amplitude": "-{k['amp_inh']}",
+                    "sigmas": ["{k['sigma_inh']}"],
+                    "normalize": "true",
+                    "shifts": ["0"],
+                    "limit": "10"
+                }}
+            }}"""
+
+    # Global inhibition (selection only; Cedar applies it to Σσ(u))
+    global_inh = "0"
+    if k["type"] == "gauss" and k.get("amp_global", 0.0) != 0.0:
+        # Cedar's global inhibition parameter is positive; the inhibitory effect is subtracted
+        global_inh = str(abs(k["amp_global"]))
+
+    # Build connections (one per stimulus)
+    connections = []
+    for i in range(n_stim):
+        name = f"Gauss Input {i+1}" if n_stim > 1 else "Gauss Input"
+        connections.append(f'{{"source": "{name}.output", "target": "Neural Field.input"}}')
+    connections.append('{"source": "Neural Field.lateral output", "target": "Neural Field.input"}')
+    conn_str = ",\n        ".join(connections)
+
+    return f"""{{
+    "meta": {{"format": "1"}},
+    "steps": {{{gauss_inputs}
+        "cedar.dynamics.NeuralField": {{
+            "name": "Neural Field",
+            "activation as output": "false",
+            "discrete metric (workaround)": "false",
+            "update stepIcon according to output": "true",
+            "threshold for updating the stepIcon": "0.8",
+            "dimensionality": "1",
+            "sizes": ["100"],
+            "time scale": "25",
+            "resting level": "{sim['h']}",
+            "input noise gain": "0",
+            "multiplicative noise (input)": "false",
+            "multiplicative noise (activation)": "false",
+            "sigmoid": {sig_block},
+            "global inhibition": "{global_inh}",
+            "lateral kernels": {lateral_kernels},
+            "lateral kernel convolution": {{
+                "engine": {{"type": "cedar.aux.conv.FFTW"}},
+                "borderType": "Cyclic",
+                "mode": "Same",
+                "alternate even kernel center": "false"
+            }},
+            "noise correlation kernel": {{
+                "dimensionality": "1", "anchor": ["0"],
+                "amplitude": "0", "sigmas": ["3"],
+                "normalize": "true", "shifts": ["0"], "limit": "5"
+            }},
+            "comments": ""
+        }}
+    }},
+    "triggers": {{
+        "cedar.processing.LoopedTrigger": {{
+            "name": "LoopedTrigger",
+            "fake euler step": "false",
+            "loop mode": "0",
+            "step size": "1",
+            "Steps": {{"cedar.dynamics.NeuralField": {{}}}}
+        }}
+    }},
+    "connections": [
+        {conn_str}
+    ],
+    "records": {{}},
+    "ui": {{}},
+    "ui view": {{}},
+    "ui generic": {{}}
+}}"""
+
+
+# ---------------------------------------------------------------------------
+# Cosivina MATLAB generator
+# ---------------------------------------------------------------------------
+
+def _cosivina_stimuli_block(sim: dict) -> tuple[str, str, str]:
+    """Return (add_elements_str, stim_sum_inputs_str, set_zero_str)."""
+    stims = sim["stimuli"]
+    n = len(stims)
+    lines = []
+    names = []
+    for i, st in enumerate(stims):
+        name = f"stimulus {i+1}" if n > 1 else "stimulus"
+        names.append(f"'{name}'")
+        lines.append(
+            f"sim.addElement(GaussStimulus1D('{name}', fieldSize, "
+            f"{st['sigma']}, {st['amp']}, {st['pos']}, true, false));"
+        )
+    add_str = "\n".join(lines)
+    sum_inputs = "{" + ", ".join(names) + "}"
+    # set-to-zero lines
+    zero_lines = [
+        f"sim.setElementParameters('{n_}', {{'amplitude'}}, {{0}});"
+        for n_ in [n.strip("'") for n in names]
+    ]
+    zero_str = "\n".join(zero_lines)
+    return add_str, sum_inputs, zero_str
+
+
+def _cosivina_restore_stim(sim: dict) -> str:
+    stims = sim["stimuli"]
+    n = len(stims)
+    lines = []
+    for i, st in enumerate(stims):
+        name = f"stimulus {i+1}" if n > 1 else "stimulus"
+        lines.append(
+            f"sim.setElementParameters('{name}', {{'amplitude'}}, {{{st['amp']}}});"
+        )
+    return "\n".join(lines)
+
+
+def build_cosivina_script(sim: dict, output_dir: str) -> str:
+    sid = sim["id"]
+    stype = sim["type"]
+    k = sim["kernel"]
+
+    add_stim, sum_inputs, set_zero = _cosivina_stimuli_block(sim)
+    restore_stim = _cosivina_restore_stim(sim)
+
+    if k["type"] == "gauss":
+        kernel_line = (
+            f"sim.addElement(GaussKernel1D('u -> u', fieldSize, "
+            f"{k['sigma']}, {k['amp']}, true, true), 'field u', 'output', 'field u');"
+        )
+        if k.get("amp_global", 0.0) != 0.0:
+            # Use LateralInteractions1D with sigma_inh=0, amp_inh=0
+            kernel_line = (
+                f"sim.addElement(LateralInteractions1D('u -> u', fieldSize, "
+                f"{k['sigma']}, {k['amp']}, 0, 0, {k['amp_global']}, true, true), "
+                f"'field u', 'output', 'field u');"
+            )
+    else:
+        kernel_line = (
+            f"sim.addElement(LateralInteractions1D('u -> u', fieldSize, "
+            f"{k['sigma_exc']}, {k['amp_exc']}, {k['sigma_inh']}, {k['amp_inh']}, 0.0, true, true), "
+            f"'field u', 'output', 'field u');"
+        )
+
+    out_dir_str = output_dir.replace("\\", "/")
+
+    return f"""%% Simulation sim_{sid} — type: {stype}
+% Auto-generated. Do not edit manually.
+
+fieldSize = 100;
+sim = Simulator();
+sim.deltaT = 25;
+
+{add_stim}
+sim.addElement(SumInputs('stimulus sum', fieldSize), {sum_inputs});
+
+sim.addElement(NeuralField('field u', fieldSize, 25, {sim['h']}, 100), 'stimulus sum');
+
+{kernel_line}
+
+outputDir = '{out_dir_str}';
+
+%% Phase 1: stimulus ON — 500 steps
+sim.init();
+for t = 1:500
+    sim.step();
+end
+u = sim.getComponent('field u', 'activation');
+writematrix(u, fullfile(outputDir, 'sim_{sid}_sigmoid_b100_with_stimulus.csv'));
+
+%% Phase 2: stimulus OFF — 500 steps
+{set_zero}
+for t = 1:500
+    sim.step();
+end
+u = sim.getComponent('field u', 'activation');
+writematrix(u, fullfile(outputDir, 'sim_{sid}_sigmoid_b100_without_stimulus.csv'));
+
+%% Re-initialise (restores all parameters to construction values)
+{restore_stim}
+sim.init();
+"""
+
+
+# ---------------------------------------------------------------------------
+# Main: write all files
+# ---------------------------------------------------------------------------
+
+def main():
+    dnfc_act_fns  = ["abssigmoid_b100", "heaviside", "sigmoid_b100"]
+    cedar_act_fns = ["abssigmoid_b100", "heaviside"]
+
+    cosivina_out = str(ROOT / "data" / "cosivina")
+
+    n_written = 0
+
+    for sim in SIMS:
+        sid = sim["id"]
+
+        # ── Cosivina ────────────────────────────────────────────────────────
+        script = build_cosivina_script(sim, cosivina_out)
+        path = COSIVINA_DIR / f"sim_{sid}.m"
+        path.write_text(script, encoding="utf-8")
+        n_written += 1
+
+        # ── dnfc ────────────────────────────────────────────────────────────
+        for afn in dnfc_act_fns:
+            data = build_dnfc_json_v2(sim, afn)
+            path = DNFC_DIR / f"sim_{sid}_{afn}.json"
+            path.write_text(json.dumps(data, indent=4), encoding="utf-8")
+            n_written += 1
+
+        # ── Cedar ───────────────────────────────────────────────────────────
+        for afn in cedar_act_fns:
+            cedar_str = build_cedar_json_str(sim, afn)
+            path = CEDAR_DIR / f"sim_{sid}_{afn}.json"
+            path.write_text(cedar_str, encoding="utf-8")
+            n_written += 1
+
+    print(f"Written {n_written} simulation files.")
+    print(f"  cosivina: {len(SIMS)} .m files")
+    print(f"  dnfc:     {len(SIMS) * len(dnfc_act_fns)} .json files")
+    print(f"  cedar:    {len(SIMS) * len(cedar_act_fns)} .json files")
+
+
+if __name__ == "__main__":
+    main()
