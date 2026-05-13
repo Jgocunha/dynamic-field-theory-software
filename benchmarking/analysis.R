@@ -44,7 +44,8 @@ read_framework <- function(filename) {
 timings <- bind_rows(
   read_framework("timings-cedar.csv"),
   read_framework("timings-cosivina.csv"),
-  read_framework("timings-dnfc.csv")
+  read_framework("timings-dnfc.csv"),
+  read_framework("timings-cosivina-python.csv")
 )
 
 cat(sprintf("Loaded %d rows total\n\n", nrow(timings)))
@@ -101,11 +102,14 @@ pivot_median <- summary_df %>%
 
 speedup <- pivot_median %>%
   mutate(
-    dnfc_vs_cosivina  = round(dnfc      / cosivina, 2),
-    cedar_vs_cosivina = round(cedar     / cosivina, 2),
-    dnfc_vs_cedar     = round(dnfc      / cedar,    2)
+    dnfc_vs_cosivina           = round(dnfc             / cosivina, 2),
+    cedar_vs_cosivina          = round(cedar            / cosivina, 2),
+    dnfc_vs_cedar              = round(dnfc             / cedar,    2),
+    `cosivina-python_vs_cosivina` = if ("cosivina-python" %in% names(.))
+                                      round(`cosivina-python` / cosivina, 2) else NA_real_
   ) %>%
-  select(N, dnfc_vs_cosivina, cedar_vs_cosivina, dnfc_vs_cedar)
+  select(N, dnfc_vs_cosivina, cedar_vs_cosivina, dnfc_vs_cedar,
+         `cosivina-python_vs_cosivina`)
 
 cat("=== Speedup ratios (headless) ===\n")
 print(as.data.frame(speedup))
