@@ -1,9 +1,25 @@
 # Cross-Platform Validation Report
-## Dynamic Neural Field Theory Implementations: Cedar, Cosivina, and dnfc
+## Dynamic Neural Field Theory Implementations: Cedar, Cosivina, cosivina-python, and dnf-composer
 
-**Date:** 2026-05-11  
-**Frameworks compared:** Cedar (C++, float32), Cosivina (MATLAB, float64), dnfc (C++, float64)  
-**Scope:** 100 simulations × 5 DFT architectures × 4 comparison pairs × 2 simulation phases
+**Frameworks compared:** Cedar (C++, float32), Cosivina (MATLAB, float64), cosivina-python (Python/NumPy, float64), dnfc (C++, float64)  
+**Scope:** 100 simulations × 5 DFT architectures × 6 comparison pairs × 2 simulation phases
+
+---
+
+## Test Machine
+
+| Property | Value |
+|---|---|
+| CPU | AMD Ryzen 5 3600 (6 cores / 12 threads, 3.6 GHz base) |
+| RAM | 32 GB DDR4 |
+| OS | Windows 11 Pro (build 10.0.22621), 64-bit |
+| Compiler (Cedar / dnfc) | MSVC 19.44 (Visual Studio 2022 Community) |
+| MATLAB version | R2023a |
+| Python version | 3.11 |
+| dnfc version | 2.4.1 |
+| Cedar version | 6.1.0 |
+| Cosivina version | 1.4.0 |
+| cosivina-python version | 0.1.0 (nonumba path) |
 
 ---
 
@@ -52,7 +68,7 @@ Three sigmoid variants are tested:
 
 | Label | Formula | Frameworks |
 |---|---|---|
-| AbsSigmoid (β=100) | σ(u) = ½(1 + β(u−θ)/(1+β|u−θ|)) | Cedar, dnfc |
+| AbsSigmoid (β=100) | σ(u) = ½(1 + β(u−θ)/(1+β abs(u−θ))) | Cedar, dnfc |
 | Heaviside (θ=0) | σ(u) = 1 if u > 0 else 0 | Cedar, dnfc |
 | Logistic sigmoid (β=100) | σ(u) = 1/(1+exp(−β(u−θ))) | Cosivina, dnfc |
 
@@ -64,24 +80,28 @@ Three sigmoid variants are tested:
 | cedar_hv_vs_dnfc_hv | Cedar Heaviside | dnfc Heaviside | Float32 ceiling (~1×10⁻⁴) |
 | cosivina_s100_vs_dnfc_s100 | Cosivina Sigmoid β=100 | dnfc Sigmoid β=100 | Float64 accumulated error (<1×10⁻⁴) |
 | cedar_abs_vs_cosivina_s100 | Cedar AbsSigmoid | Cosivina Sigmoid β=100 | Systematic (different families) |
+| cosivina_python_s100_vs_dnfc_s100 | cosivina-python Sigmoid β=100 | dnfc Sigmoid β=100 | Float64 accumulated error (<1×10⁻⁴) |
+| cosivina_python_s100_vs_cosivina_s100 | cosivina-python Sigmoid β=100 | Cosivina Sigmoid β=100 | Float64 accumulated error (<1×10⁻⁴) |
 
 ### 2.6 Implementation Constraints
 
-| Parameter | Cedar | Cosivina | dnfc |
-|---|---|---|---|
-| Float precision | float32 (CV_32F) | float64 | float64 |
-| Spatial convention | 0-based (output shifted +1 for comparison) | 1-based | 1-based |
-| Kernel support | `limit = 10` (half-width = round_odd(limit × σ)) | `cutoffFactor = 5.0` | `cutoffFactor = 5.0` |
-| Kernel normalisation | Enabled | Enabled | Enabled |
-| Field size | 100 | 100 | 100 |
-| Noise | 0 | 0 | 0 |
-| Boundary condition | Cyclic | Cyclic | Cyclic |
+| Parameter | Cedar | Cosivina | cosivina-python | dnfc |
+|---|---|---|---|---|
+| Float precision | float32 (CV_32F) | float64 | float64 | float64 |
+| Spatial convention | 0-based (output shifted +1 for comparison) | 1-based | 1-based | 1-based |
+| Kernel support | `limit = 10` (half-width = round_odd(limit × σ)) | `cutoffFactor = 5.0` | `cutoffFactor = 5.0` | `cutoffFactor = 5.0` |
+| Kernel normalisation | Enabled | Enabled | Enabled | Enabled |
+| Field size | 100 | 100 | 100 | 100 |
+| Noise | 0 | 0 | 0 | 0 |
+| Boundary condition | Cyclic | Cyclic | Cyclic | Cyclic |
 
 ---
 
 ## 3. Results
 
 ### 3.1 Algebraic Equivalence (Same Activation Function Family)
+
+![Equivalence summary](fig_validation_equivalence.png)
 
 All three same-family comparison pairs **PASS** the algebraic equivalence criterion.
 
@@ -98,6 +118,8 @@ All three same-family comparison pairs **PASS** the algebraic equivalence criter
 - **Cosivina vs dnfc (Logistic Sigmoid β=100):** Both frameworks use float64. The observed maximum deviation of 5×10⁻⁵ reflects the accumulated rounding error of 500 Euler integration steps under slightly different computation orders (MATLAB vs C++). This is well within the float64 expected tolerance for this integration length.
 
 ### 3.2 Behavioural Reliability (Qualitative Agreement)
+
+![Deviation boxplots](fig_validation_boxplots.png)
 
 **800 / 800 comparisons (100%) show qualitative agreement** across all simulation types, phases, and comparison pairs.
 

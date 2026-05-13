@@ -1,15 +1,16 @@
 """
-Generate all 600 simulation files for the cross-framework algebraic equivalence test suite.
+Generate all simulation files for the cross-framework algebraic equivalence test suite.
 
 Outputs (relative to this script's directory):
-  simulations/cosivina/sim_NNN.m          (100 files)
-  simulations/dnfc/sim_NNN_abssigmoid_b100.json   (100)
-  simulations/dnfc/sim_NNN_heaviside.json          (100)
-  simulations/dnfc/sim_NNN_sigmoid_b100.json       (100)
-  simulations/cedar/sim_NNN_abssigmoid_b100.json   (100)
+  simulations/cosivina/sim_NNN.m                    (100 files)
+  simulations/cosivina-python/sim_NNN.py            (100 files)
+  simulations/dnfc/sim_NNN_abssigmoid_b100.json     (100)
+  simulations/dnfc/sim_NNN_heaviside.json           (100)
+  simulations/dnfc/sim_NNN_sigmoid_b100.json        (100)
+  simulations/cedar/sim_NNN_abssigmoid_b100.json    (100)
   simulations/cedar/sim_NNN_heaviside.json          (100)
 
-Total: 600 files.
+Total: 700 files.
 """
 
 import json
@@ -102,17 +103,17 @@ mem_params = [
     (-5.0, 15.0, 75, 3.4, 17.7, 8.9, 13.5),
     (-5.0, 15.0, 50, 3.0, 17.7, 8.9, 13.5),
     (-5.0, 15.0, 50, 4.0, 17.7, 8.9, 13.5),
-    (-5.0, 15.0, 50, 3.4, 15.0, 8.9, 13.5),
+    (-5.0, 15.0, 50, 3.4, 17.7, 8.9,  9.0),
     (-5.0, 15.0, 50, 3.4, 20.0, 8.9, 13.5),
     (-5.0, 15.0, 50, 3.4, 17.7, 7.0, 13.5),
-    (-5.0, 15.0, 50, 3.4, 17.7,10.0, 13.5),
+    (-5.0, 15.0, 50, 3.4, 19.0, 8.9, 13.5),
     (-5.0, 15.0, 50, 3.4, 17.7, 8.9, 11.0),
     (-5.0, 15.0, 50, 3.4, 17.7, 8.9, 16.0),
     (-5.0, 15.0, 33, 3.4, 17.7, 8.9, 13.5),
     (-5.0, 15.0, 67, 3.4, 17.7, 8.9, 13.5),
     (-6.0, 18.0, 50, 3.4, 17.7, 8.9, 13.5),
-    (-4.0, 12.0, 50, 4.0, 20.0, 8.9, 13.5),
-    (-5.0, 15.0, 50, 3.0, 16.0, 9.5, 14.0),
+    (-5.5, 17.0, 50, 3.4, 20.0, 8.9, 13.5),
+    (-5.0, 15.0, 50, 3.4, 20.0, 8.5, 13.0),
 ]
 for i, (h, sa, sp, se, ae, si, ai) in enumerate(mem_params, 41):
     SIMS.append({"id": f"{i:03d}", "type": "memory", "h": h,
@@ -183,9 +184,10 @@ assert len(SIMS) == 100, f"Expected 100 sims, got {len(SIMS)}"
 # Helpers
 # ---------------------------------------------------------------------------
 
-COSIVINA_DIR = ROOT / "simulations" / "cosivina"
-DNFC_DIR     = ROOT / "simulations" / "dnfc"
-CEDAR_DIR    = ROOT / "simulations" / "cedar"
+COSIVINA_DIR        = ROOT / "simulations" / "cosivina"
+COSIVINA_PYTHON_DIR = ROOT / "simulations" / "cosivina-python"
+DNFC_DIR            = ROOT / "simulations" / "dnfc"
+CEDAR_DIR           = ROOT / "simulations" / "cedar"
 
 
 def dnfc_act_fn(name: str) -> dict:
@@ -635,6 +637,152 @@ sim.init();
 
 
 # ---------------------------------------------------------------------------
+# cosivina-python script generator
+# ---------------------------------------------------------------------------
+
+def _python_stimuli_block(sim: dict) -> tuple[str, str, str]:
+    """Return (add_elements_str, sum_input_arg, set_zero_str)."""
+    stims = sim["stimuli"]
+    n = len(stims)
+    lines = []
+    names = []
+    for i, st in enumerate(stims):
+        name = f"stimulus {i+1}" if n > 1 else "stimulus"
+        names.append(name)
+        lines.append(
+            f"    sim.addElement(\n"
+            f"        GaussStimulus1D('{name}', FIELD_SIZE,\n"
+            f"                        sigma={st['sigma']}, amplitude={st['amp']}, "
+            f"position={st['pos']},\n"
+            f"                        circular=True, normalized=False))"
+        )
+    add_str = "\n".join(lines)
+    sum_arg = repr(names) if n > 1 else repr(names[0])
+    zero_lines = [
+        f"    sim.setElementParameters('{name}', 'amplitude', 0.0)"
+        for name in names
+    ]
+    zero_str = "\n".join(zero_lines)
+    return add_str, sum_arg, zero_str
+
+
+def _python_restore_stim(sim: dict) -> str:
+    stims = sim["stimuli"]
+    n = len(stims)
+    lines = []
+    for i, st in enumerate(stims):
+        name = f"stimulus {i+1}" if n > 1 else "stimulus"
+        lines.append(
+            f"    sim.setElementParameters('{name}', 'amplitude', {st['amp']})"
+        )
+    return "\n".join(lines)
+
+
+def build_cosivina_python_script(sim: dict, output_dir: str) -> str:
+    sid   = sim["id"]
+    stype = sim["type"]
+    k     = sim["kernel"]
+
+    add_stim, sum_arg, set_zero = _python_stimuli_block(sim)
+    restore_stim = _python_restore_stim(sim)
+
+    if k["type"] == "gauss" and k.get("amp_global", 0.0) == 0.0:
+        kernel_lines = (
+            f"    sim.addElement(\n"
+            f"        GaussKernel1D('u->u', FIELD_SIZE,\n"
+            f"                      sigma={k['sigma']}, amplitude={k['amp']},\n"
+            f"                      circular=True, normalized=True),\n"
+            f"        inputLabels='field u', inputComponents='output',\n"
+            f"        targetLabels='field u')"
+        )
+    elif k["type"] == "gauss":
+        kernel_lines = (
+            f"    sim.addElement(\n"
+            f"        LateralInteractions1D('u->u', FIELD_SIZE,\n"
+            f"                              sigmaExc={k['sigma']}, amplitudeExc={k['amp']},\n"
+            f"                              sigmaInh=0.0, amplitudeInh=0.0,\n"
+            f"                              amplitudeGlobal={k['amp_global']},\n"
+            f"                              circular=True, normalized=True),\n"
+            f"        inputLabels='field u', inputComponents='output',\n"
+            f"        targetLabels='field u')"
+        )
+    else:
+        kernel_lines = (
+            f"    sim.addElement(\n"
+            f"        LateralInteractions1D('u->u', FIELD_SIZE,\n"
+            f"                              sigmaExc={k['sigma_exc']}, amplitudeExc={k['amp_exc']},\n"
+            f"                              sigmaInh={k['sigma_inh']}, amplitudeInh={k['amp_inh']},\n"
+            f"                              amplitudeGlobal=0.0,\n"
+            f"                              circular=True, normalized=True),\n"
+            f"        inputLabels='field u', inputComponents='output',\n"
+            f"        targetLabels='field u')"
+        )
+
+    out_dir_str = output_dir.replace("\\", "/")
+
+    return f'''# sim_{sid}.py — type: {stype}
+# Auto-generated. Do not edit manually.
+# Run standalone:  python sim_{sid}.py
+# Or import and call run(output_dir).
+
+import os
+import sys
+import numpy as np
+from pathlib import Path
+
+_COSIVINA_PYTHON_ROOT = Path(__file__).resolve().parents[4] / "cosivina_python"
+if str(_COSIVINA_PYTHON_ROOT) not in sys.path:
+    sys.path.insert(0, str(_COSIVINA_PYTHON_ROOT))
+
+from cosivina.nonumba import (
+    Simulator, GaussStimulus1D, SumInputs,
+    NeuralField, GaussKernel1D, LateralInteractions1D,
+)
+
+FIELD_SIZE = (1, 100)
+TAU        = 25.0
+BETA       = 100.0
+
+
+def run(output_dir: str = r"{out_dir_str}") -> None:
+    sim = Simulator(deltaT=TAU)
+
+{add_stim}
+    sim.addElement(SumInputs("stimulus sum", FIELD_SIZE), {sum_arg})
+    sim.addElement(
+        NeuralField("field u", FIELD_SIZE, tau=TAU, h={sim['h']}, beta=BETA),
+        inputLabels="stimulus sum")
+{kernel_lines}
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Phase 1: stimulus ON — 500 steps
+    sim.init()
+    for _ in range(500):
+        sim.step()
+    u = sim.getComponent("field u", "activation")
+    np.savetxt(os.path.join(output_dir, "sim_{sid}_sigmoid_b100_with_stimulus.csv"),
+               [u[0]], delimiter=",", fmt="%.15g")
+
+    # Phase 2: stimulus OFF — 500 steps
+{set_zero}
+    for _ in range(500):
+        sim.step()
+    u = sim.getComponent("field u", "activation")
+    np.savetxt(os.path.join(output_dir, "sim_{sid}_sigmoid_b100_without_stimulus.csv"),
+               [u[0]], delimiter=",", fmt="%.15g")
+
+    # Restore stimulus amplitudes
+{restore_stim}
+    sim.init()
+
+
+if __name__ == "__main__":
+    run()
+'''
+
+
+# ---------------------------------------------------------------------------
 # Main: write all files
 # ---------------------------------------------------------------------------
 
@@ -642,17 +790,26 @@ def main():
     dnfc_act_fns  = ["abssigmoid_b100", "heaviside", "sigmoid_b100"]
     cedar_act_fns = ["abssigmoid_b100", "heaviside"]
 
-    cosivina_out = str(ROOT / "data" / "cosivina")
+    cosivina_out        = str(ROOT / "data" / "cosivina")
+    cosivina_python_out = str(ROOT / "data" / "cosivina-python")
+
+    COSIVINA_PYTHON_DIR.mkdir(parents=True, exist_ok=True)
 
     n_written = 0
 
     for sim in SIMS:
         sid = sim["id"]
 
-        # ── Cosivina ────────────────────────────────────────────────────────
+        # ── Cosivina (MATLAB) ───────────────────────────────────────────────
         script = build_cosivina_script(sim, cosivina_out)
         path = COSIVINA_DIR / f"sim_{sid}.m"
         path.write_text(script, encoding="utf-8")
+        n_written += 1
+
+        # ── cosivina-python ─────────────────────────────────────────────────
+        py_script = build_cosivina_python_script(sim, cosivina_python_out)
+        path = COSIVINA_PYTHON_DIR / f"sim_{sid}.py"
+        path.write_text(py_script, encoding="utf-8")
         n_written += 1
 
         # ── dnfc ────────────────────────────────────────────────────────────
@@ -670,9 +827,10 @@ def main():
             n_written += 1
 
     print(f"Written {n_written} simulation files.")
-    print(f"  cosivina: {len(SIMS)} .m files")
-    print(f"  dnfc:     {len(SIMS) * len(dnfc_act_fns)} .json files")
-    print(f"  cedar:    {len(SIMS) * len(cedar_act_fns)} .json files")
+    print(f"  cosivina:        {len(SIMS)} .m files")
+    print(f"  cosivina-python: {len(SIMS)} .py files")
+    print(f"  dnfc:            {len(SIMS) * len(dnfc_act_fns)} .json files")
+    print(f"  cedar:           {len(SIMS) * len(cedar_act_fns)} .json files")
 
 
 if __name__ == "__main__":

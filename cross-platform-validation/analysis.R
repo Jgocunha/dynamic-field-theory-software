@@ -93,6 +93,10 @@ df_cosivina <- load_framework("cosivina",
                               c("sigmoid_b100"),
                               apply_cedar_shift = FALSE)
 
+df_cosivina_python <- load_framework("cosivina-python",
+                                     c("sigmoid_b100"),
+                                     apply_cedar_shift = FALSE)
+
 df_dnfc     <- load_framework("dnfc",
                               c("abssigmoid_b100", "heaviside", "sigmoid_b100"),
                               apply_cedar_shift = FALSE)
@@ -101,7 +105,7 @@ df_cedar    <- load_framework("cedar",
                               c("abssigmoid_b100", "heaviside"),
                               apply_cedar_shift = TRUE)  # correct 0-based offset
 
-all_loaded <- bind_rows(df_cosivina, df_dnfc, df_cedar)
+all_loaded <- bind_rows(df_cosivina, df_cosivina_python, df_dnfc, df_cedar)
 cat(sprintf("Loaded %d rows total.\n", nrow(all_loaded)))
 
 # ---------------------------------------------------------------------------
@@ -177,6 +181,24 @@ if (!is.null(df_cedar) && !is.null(df_cosivina)) {
   )
 }
 
+# 5. cosivina-python sigmoid β=100 vs dnfc sigmoid β=100
+if (!is.null(df_cosivina_python) && !is.null(df_dnfc)) {
+  pairs_list[["cosivina_python_s100_vs_dnfc_s100"]] <- compute_pair_metrics(
+    get_profiles(df_cosivina_python, "cosivina-python", "sigmoid_b100"),
+    get_profiles(df_dnfc,            "dnfc",            "sigmoid_b100"),
+    "cosivina_python_s100_vs_dnfc_s100"
+  )
+}
+
+# 6. cosivina-python sigmoid β=100 vs cosivina (MATLAB) sigmoid β=100
+if (!is.null(df_cosivina_python) && !is.null(df_cosivina)) {
+  pairs_list[["cosivina_python_s100_vs_cosivina_s100"]] <- compute_pair_metrics(
+    get_profiles(df_cosivina_python, "cosivina-python", "sigmoid_b100"),
+    get_profiles(df_cosivina,        "cosivina",        "sigmoid_b100"),
+    "cosivina_python_s100_vs_cosivina_s100"
+  )
+}
+
 metrics <- bind_rows(pairs_list)
 
 # ---------------------------------------------------------------------------
@@ -230,10 +252,12 @@ for (pr in unique(metrics$pair)) {
 # ---------------------------------------------------------------------------
 
 PAIR_LABELS <- c(
-  cedar_abs_vs_dnfc_abs    = "Cedar AbsSig vs dnfc AbsSig",
-  cedar_hv_vs_dnfc_hv      = "Cedar HV vs dnfc HV",
-  cosivina_s100_vs_dnfc_s100 = "Cosivina Sig vs dnfc Sig",
-  cedar_abs_vs_cosivina_s100 = "Cedar AbsSig vs Cosivina Sig"
+  cedar_abs_vs_dnfc_abs                 = "Cedar AbsSig vs dnfc AbsSig",
+  cedar_hv_vs_dnfc_hv                   = "Cedar HV vs dnfc HV",
+  cosivina_s100_vs_dnfc_s100            = "Cosivina Sig vs dnfc Sig",
+  cedar_abs_vs_cosivina_s100            = "Cedar AbsSig vs Cosivina Sig",
+  cosivina_python_s100_vs_dnfc_s100     = "Cosivina-Python Sig vs dnfc Sig",
+  cosivina_python_s100_vs_cosivina_s100 = "Cosivina-Python Sig vs Cosivina Sig"
 )
 
 if (nrow(metrics) > 0) {
@@ -269,12 +293,13 @@ rep_sims <- c(detection = "001", selection = "021", memory = "041",
               insufficient = "061", multi_peak = "081")
 
 PROFILE_PALETTE <- c(
-  "cedar / AbsSig"    = "#1f77b4",
-  "cedar / Heaviside" = "#aec7e8",
-  "dnfc / AbsSig"     = "#ff7f0e",
-  "dnfc / Heaviside"  = "#ffbb78",
-  "dnfc / Sigmoid"    = "#2ca02c",
-  "cosivina / Sigmoid"= "#d62728"
+  "cedar / AbsSig"             = "#1f77b4",
+  "cedar / Heaviside"          = "#aec7e8",
+  "dnfc / AbsSig"              = "#ff7f0e",
+  "dnfc / Heaviside"           = "#ffbb78",
+  "dnfc / Sigmoid"             = "#2ca02c",
+  "cosivina / Sigmoid"         = "#d62728",
+  "cosivina-python / Sigmoid"  = "#9467bd"
 )
 
 profile_rows <- list()
@@ -282,12 +307,13 @@ for (tp in names(rep_sims)) {
   sid <- rep_sims[[tp]]
   for (ph in c("with_stimulus", "without_stimulus")) {
     for (row in list(
-      list(fw="cedar",    af="abssigmoid_b100", lbl="cedar / AbsSig"),
-      list(fw="cedar",    af="heaviside",       lbl="cedar / Heaviside"),
-      list(fw="dnfc",     af="abssigmoid_b100", lbl="dnfc / AbsSig"),
-      list(fw="dnfc",     af="heaviside",       lbl="dnfc / Heaviside"),
-      list(fw="dnfc",     af="sigmoid_b100",    lbl="dnfc / Sigmoid"),
-      list(fw="cosivina", af="sigmoid_b100",    lbl="cosivina / Sigmoid")
+      list(fw="cedar",            af="abssigmoid_b100", lbl="cedar / AbsSig"),
+      list(fw="cedar",            af="heaviside",       lbl="cedar / Heaviside"),
+      list(fw="dnfc",             af="abssigmoid_b100", lbl="dnfc / AbsSig"),
+      list(fw="dnfc",             af="heaviside",       lbl="dnfc / Heaviside"),
+      list(fw="dnfc",             af="sigmoid_b100",    lbl="dnfc / Sigmoid"),
+      list(fw="cosivina",         af="sigmoid_b100",    lbl="cosivina / Sigmoid"),
+      list(fw="cosivina-python",  af="sigmoid_b100",    lbl="cosivina-python / Sigmoid")
     )) {
       sub <- all_loaded %>%
         filter(sim_id == sid, phase == ph, framework == row$fw, act_fn == row$af)
@@ -314,12 +340,13 @@ if (length(profile_rows) > 0) {
     facet_grid(panel ~ phase_label) +
     scale_colour_manual(values = PROFILE_PALETTE) +
     scale_linetype_manual(values = c(
-      "cedar / AbsSig"    = "solid",
-      "cedar / Heaviside" = "dashed",
-      "dnfc / AbsSig"     = "dotted",
-      "dnfc / Heaviside"  = "dotdash",
-      "dnfc / Sigmoid"    = "solid",
-      "cosivina / Sigmoid"= "longdash"
+      "cedar / AbsSig"            = "solid",
+      "cedar / Heaviside"         = "dashed",
+      "dnfc / AbsSig"             = "dotted",
+      "dnfc / Heaviside"          = "dotdash",
+      "dnfc / Sigmoid"            = "solid",
+      "cosivina / Sigmoid"        = "longdash",
+      "cosivina-python / Sigmoid" = "twodash"
     )) +
     labs(x = "Field position", y = "Activation u",
          colour = "Framework / Act. fn.",
@@ -378,8 +405,11 @@ FLOAT32_CEIL <- 2e-4   # Cedar uses CV_32F; dnfc uses float64 → effective ceil
 FLOAT64_CEIL <- 1e-4   # cosivina vs dnfc both float64; independent numeric paths
 
 same_family_pairs <- c("cedar_abs_vs_dnfc_abs", "cedar_hv_vs_dnfc_hv",
-                       "cosivina_s100_vs_dnfc_s100")
-same_family_thrs  <- c(FLOAT32_CEIL, FLOAT32_CEIL, FLOAT64_CEIL)
+                       "cosivina_s100_vs_dnfc_s100",
+                       "cosivina_python_s100_vs_dnfc_s100",
+                       "cosivina_python_s100_vs_cosivina_s100")
+same_family_thrs  <- c(FLOAT32_CEIL, FLOAT32_CEIL, FLOAT64_CEIL,
+                       FLOAT64_CEIL, FLOAT64_CEIL)
 
 cat("--- Algebraic equivalence (same activation function family) ---\n")
 for (i in seq_along(same_family_pairs)) {
