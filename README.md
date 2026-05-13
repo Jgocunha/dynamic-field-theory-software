@@ -8,10 +8,10 @@ This repository documents two independent studies comparing four implementations
 
 | Framework | Language | Precision | Version |
 |---|---|---|---|
-| [Cedar](https://cedar.ini.rub.de/) | C++ | float32 | 6.1.0 |
+| [Cedar](https://github.com/cedar/cedar) | C++ | float32 | 6.1.0 |
 | [Cosivina](https://github.com/cosivina/cosivina) | MATLAB | float64 | 1.4.0 |
-| [cosivina-python](https://github.com/cosivina/cosivina-python) | Python / NumPy | float64 | 0.1.0 |
-| [dnf-composer](https://github.com/cedar-framework/dnfc) | C++ | float64 | 2.4.1 |
+| [cosivina-python](https://github.com/cosivina/cosivina_python) | Python / NumPy | float64 | 0.1.0 |
+| [dnf-composer](https://github.com/Jgocunha/dynamic-neural-field-composer) | C++ | float64 | 2.4.1 |
 
 All frameworks implement the 1D Amari equation:
 

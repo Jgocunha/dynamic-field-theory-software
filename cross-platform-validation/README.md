@@ -101,6 +101,8 @@ Three sigmoid variants are tested:
 
 ### 3.1 Algebraic Equivalence (Same Activation Function Family)
 
+![Equivalence summary](fig_validation_equivalence.png)
+
 All three same-family comparison pairs **PASS** the algebraic equivalence criterion.
 
 | Pair | Max abs(Δu) | Median abs(Δu) | % within threshold | Threshold | Status |
@@ -116,6 +118,8 @@ All three same-family comparison pairs **PASS** the algebraic equivalence criter
 - **Cosivina vs dnfc (Logistic Sigmoid β=100):** Both frameworks use float64. The observed maximum deviation of 5×10⁻⁵ reflects the accumulated rounding error of 500 Euler integration steps under slightly different computation orders (MATLAB vs C++). This is well within the float64 expected tolerance for this integration length.
 
 ### 3.2 Behavioural Reliability (Qualitative Agreement)
+
+![Deviation boxplots](fig_validation_boxplots.png)
 
 **800 / 800 comparisons (100%) show qualitative agreement** across all simulation types, phases, and comparison pairs.
 

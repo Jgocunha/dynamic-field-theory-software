@@ -45,6 +45,10 @@ Total elements: 4N. Fields are independent (no cross-field connections).
 
 ## Results
 
+![Throughput](fig_benchmark_throughput.png)
+
+![Speedup](fig_benchmark_speedup.png)
+
 ### Table 1 — Steps per second (median of 3 runs)
 
 | Framework | N=10 | N=50 | N=100 | N=500 | N=1000 |
