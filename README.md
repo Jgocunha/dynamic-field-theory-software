@@ -38,7 +38,7 @@ Each benchmark creates N independent neural fields and measures wall-clock steps
 
 | Framework | N=10 | N=50 | N=100 | N=500 | N=1000 |
 |---|---:|---:|---:|---:|---:|
-| Cedar | 5 798 | 1 240 | 616 | 118 | 61 |
+| Cedar | 3 056 | 610 | 297 | 49 | 25 |
 | Cosivina | 2 443 | 496 | 244 | 46 | 22 |
 | cosivina-python | 2 091 | 426 | 209 | 42 | 20 |
 | dnfc | 8 190 | 1 601 | 794 | 142 | 70 |
@@ -47,13 +47,13 @@ Each benchmark creates N independent neural fields and measures wall-clock steps
 
 | N | dnfc | Cedar | cosivina-python |
 |---|---:|---:|---:|
-| 10 | 3.35× | 2.37× | 0.86× |
-| 50 | 3.23× | 2.50× | 0.86× |
-| 100 | 3.25× | 2.53× | 0.86× |
-| 500 | 3.12× | 2.60× | 0.92× |
-| 1000 | 3.13× | 2.73× | 0.92× |
+| 10 | 3.35× | 1.25× | 0.86× |
+| 50 | 3.23× | 1.23× | 0.86× |
+| 100 | 3.25× | 1.22× | 0.86× |
+| 500 | 3.12× | 1.08× | 0.92× |
+| 1000 | 3.13× | 1.12× | 0.92× |
 
-**dnfc is consistently the fastest**. Cedar is ~2.4–2.7× faster than Cosivina; cosivina-python runs at ~86–92% of Cosivina speed. See [`benchmarking/README.md`](benchmarking/README.md) for the full methodology and statistical breakdown.
+**dnfc is consistently the fastest** (~3.1–3.4× Cosivina). Cedar is modestly faster than Cosivina (~1.1–1.25×, narrowing at large N); cosivina-python runs at ~86–92% of Cosivina speed. Cedar is run through its real library API (OpenCV `CV_32F` convolution), so these figures reflect the full framework overhead. See [`benchmarking/README.md`](benchmarking/README.md) for the full methodology and statistical breakdown.
 
 ---
 

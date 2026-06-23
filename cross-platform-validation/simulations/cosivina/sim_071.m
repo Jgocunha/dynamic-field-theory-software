@@ -12,7 +12,7 @@ sim.addElement(NeuralField('field u', fieldSize, 25, -12.0, 100), 'stimulus sum'
 
 sim.addElement(GaussKernel1D('u -> u', fieldSize, 3, 4.0, true, true), 'field u', 'output', 'field u');
 
-outputDir = 'C:/Users/gaspa/OneDrive - Universidade do Minho/phd-degree/journals/SoftwareX/cross-platform-validation/data/cosivina';
+outputDir = 'C:/dev-files/dynamic-field-theory-software/cross-platform-validation/data/cosivina';
 
 %% Phase 1: stimulus ON — 500 steps
 sim.init();

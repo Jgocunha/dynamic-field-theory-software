@@ -58,7 +58,7 @@
                 }
             },
             "lateral kernel convolution": {
-                "engine": {"type": "cedar.aux.conv.FFTW"},
+                "engine": {"type": "cedar.aux.conv.OpenCV"},
                 "borderType": "Cyclic",
                 "mode": "Same",
                 "alternate even kernel center": "false"
@@ -81,10 +81,9 @@
         }
     },
     "connections": [
-        {"source": "Gauss Input 1.output", "target": "Neural Field.input"},
-        {"source": "Gauss Input 2.output", "target": "Neural Field.input"},
-        {"source": "Gauss Input 3.output", "target": "Neural Field.input"},
-        {"source": "Neural Field.lateral output", "target": "Neural Field.input"}
+        {"source": "Gauss Input 1.Gauss input", "target": "Neural Field.input"},
+        {"source": "Gauss Input 2.Gauss input", "target": "Neural Field.input"},
+        {"source": "Gauss Input 3.Gauss input", "target": "Neural Field.input"}
     ],
     "records": {},
     "ui": {},

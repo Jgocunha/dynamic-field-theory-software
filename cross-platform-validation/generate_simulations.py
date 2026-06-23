@@ -463,18 +463,22 @@ def build_cedar_json_str(sim: dict, act_fn: str) -> str:
                 }}
             }}"""
 
-    # Global inhibition (selection only; Cedar applies it to Σσ(u))
+    # Global inhibition (selection only). Cedar's eulerStep adds
+    # global_inhibition * sum(sigmoid(u)) to du, so the parameter must carry the
+    # (negative) sign of the inhibition directly — same convention as dnfc's amp_global.
     global_inh = "0"
     if k["type"] == "gauss" and k.get("amp_global", 0.0) != 0.0:
-        # Cedar's global inhibition parameter is positive; the inhibitory effect is subtracted
-        global_inh = str(abs(k["amp_global"]))
+        global_inh = str(k["amp_global"])
 
-    # Build connections (one per stimulus)
+    # Build connections (one per stimulus).
+    # Cedar slot name: GaussInput output = "Gauss input"; NeuralField input
+    # collection = "input". The lateral interaction is applied INTERNALLY by the
+    # field (it convolves its own sigmoided activation with the lateral kernel),
+    # so there is no explicit self-connection (Cedar rejects it as a deadlock).
     connections = []
     for i in range(n_stim):
         name = f"Gauss Input {i+1}" if n_stim > 1 else "Gauss Input"
-        connections.append(f'{{"source": "{name}.output", "target": "Neural Field.input"}}')
-    connections.append('{"source": "Neural Field.lateral output", "target": "Neural Field.input"}')
+        connections.append(f'{{"source": "{name}.Gauss input", "target": "Neural Field.input"}}')
     conn_str = ",\n        ".join(connections)
 
     return f"""{{
@@ -497,7 +501,7 @@ def build_cedar_json_str(sim: dict, act_fn: str) -> str:
             "global inhibition": "{global_inh}",
             "lateral kernels": {lateral_kernels},
             "lateral kernel convolution": {{
-                "engine": {{"type": "cedar.aux.conv.FFTW"}},
+                "engine": {{"type": "cedar.aux.conv.OpenCV"}},
                 "borderType": "Cyclic",
                 "mode": "Same",
                 "alternate even kernel center": "false"
