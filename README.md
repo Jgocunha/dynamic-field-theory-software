@@ -26,7 +26,8 @@ All frameworks implement the 1D Amari equation:
 | Directory | Contents |
 |---|---|
 | [`benchmarking/`](benchmarking/README.md) | Performance benchmark: N independent neural fields (N ∈ {10, 50, 100, 500, 1000}), measuring simulation steps per second |
-| [`cross-platform-validation/`](cross-platform-validation/README.md) | Correctness study: 100 DFT simulations across 5 architectures, verifying algebraic equivalence and behavioural reliability |
+| [`cross-platform-validation/`](cross-platform-validation/README.md) | Correctness study (1D): 100 DFT simulations across 5 architectures, verifying algebraic equivalence and behavioural reliability |
+| [`cross-platform-validation-2d/`](cross-platform-validation-2d/README.md) | Same correctness study on 2D (50×50) fields |
 
 ---
 
@@ -57,7 +58,7 @@ Each benchmark creates N independent neural fields and measures wall-clock steps
 
 ---
 
-## Cross-Platform Validation Results
+## Cross-Platform Validation Results (1D)
 
 100 simulations were run across 5 DFT architectures (detection, selection, memory, insufficient, multi-peak), each executed in two phases (stimulus ON / OFF). Results were compared across 6 framework pairs.
 
@@ -78,3 +79,25 @@ All same-family pairs pass; deviations are bounded by float32 rounding (Cedar) o
 **800 / 800 comparisons (100%)** show qualitative agreement across all frameworks, simulation types, phases, and activation function families. No simulation produces a qualitative discrepancy (bump in one framework, no bump in another).
 
 See [`cross-platform-validation/README.md`](cross-platform-validation/README.md) for the full experimental design, cross-family deviation analysis, and figures.
+
+---
+
+## Cross-Platform Validation Results (2D)
+
+The same 100-simulation, 5-architecture suite was run on **2D (50×50) fields** (dnfc, Cedar, cosivina-python; Cosivina/MATLAB pending). Stimuli are placed on the grid diagonal and kernel amplitudes are re-tuned per architecture type (a normalized 2D Gaussian is ~7.5× weaker at peak than 1D); see [`cross-platform-validation-2d/test_suite_2d.md`](cross-platform-validation-2d/test_suite_2d.md).
+
+### Algebraic equivalence (same activation function family)
+
+| Comparison pair | Max abs(Δu) | Median | Threshold | Result |
+|---|---:|---:|---:|---:|
+| cosivina-python Sigmoid β=100 vs dnfc Sigmoid β=100 | 5.00×10⁻⁵ | 5×10⁻⁶ | 1×10⁻⁴ | **PASS** |
+| Cedar AbsSigmoid vs dnfc AbsSigmoid | 1.00×10⁻⁴ (non-memory) | 1×10⁻⁵ | 2×10⁻⁴ | **PASS** except memory |
+| Cedar Heaviside vs dnfc Heaviside | 1.00×10⁻⁴ (non-memory) | 1×10⁻⁵ | 2×10⁻⁴ | **PASS** except memory |
+
+The two float64 frameworks are algebraically equivalent in 2D to 5×10⁻⁵. Cedar (float32) vs dnfc agree to ≤1×10⁻⁴ for detection, selection, insufficient, and multi-peak; only the **memory** architecture exceeds the threshold (up to ~2.9), where the self-sustaining bistable bump's steep 2D activation perimeter amplifies the float32/float64 difference at edge cells — the bumps still match in location, peak, and size.
+
+### Behavioural reliability
+
+**600 / 600 comparisons (100%)** show qualitative agreement across all frameworks, simulation types, and phases — including the self-sustaining memory bumps.
+
+See [`cross-platform-validation-2d/README.md`](cross-platform-validation-2d/README.md) for the full 2D design, per-type amplitude rules, and figures.

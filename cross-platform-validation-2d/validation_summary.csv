@@ -1,0 +1,4 @@
+"pair","n","max_max_abs_diff","median_max_abs","mean_max_abs","pct_below_1e4","algebraic_equiv"
+"cedar_abs_vs_dnfc_abs",200,2.88687,1.00000000005096e-05,0.0433991145000001,78.5,FALSE
+"cedar_hv_vs_dnfc_hv",200,1.0294,1.00000000000655e-05,0.0339352150000002,77.5,FALSE
+"cosivina_python_s100_vs_dnfc_s100",200,4.999800660066e-05,4.99736720005473e-06,2.35345860020542e-05,100,TRUE
