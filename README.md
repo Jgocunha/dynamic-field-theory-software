@@ -84,20 +84,22 @@ See [`cross-platform-validation/README.md`](cross-platform-validation/README.md)
 
 ## Cross-Platform Validation Results (2D)
 
-The same 100-simulation, 5-architecture suite was run on **2D (50×50) fields** (dnfc, Cedar, cosivina-python; Cosivina/MATLAB pending). Stimuli are placed on the grid diagonal and kernel amplitudes are re-tuned per architecture type (a normalized 2D Gaussian is ~7.5× weaker at peak than 1D); see [`cross-platform-validation-2d/test_suite_2d.md`](cross-platform-validation-2d/test_suite_2d.md).
+The same 100-simulation, 5-architecture suite was run on **2D (50×50) fields** across all four frameworks (dnfc, Cedar, Cosivina, cosivina-python). Stimuli are placed on the grid diagonal and kernel amplitudes are re-tuned per architecture type (a normalized 2D Gaussian is ~7.5× weaker at peak than 1D); see [`cross-platform-validation-2d/test_suite_2d.md`](cross-platform-validation-2d/test_suite_2d.md).
 
 ### Algebraic equivalence (same activation function family)
 
 | Comparison pair | Max abs(Δu) | Median | Threshold | Result |
 |---|---:|---:|---:|---:|
-| cosivina-python Sigmoid β=100 vs dnfc Sigmoid β=100 | 5.00×10⁻⁵ | 5×10⁻⁶ | 1×10⁻⁴ | **PASS** |
-| Cedar AbsSigmoid vs dnfc AbsSigmoid | 1.00×10⁻⁴ (non-memory) | 1×10⁻⁵ | 2×10⁻⁴ | **PASS** except memory |
-| Cedar Heaviside vs dnfc Heaviside | 1.00×10⁻⁴ (non-memory) | 1×10⁻⁵ | 2×10⁻⁴ | **PASS** except memory |
+| Cosivina Sigmoid β=100 vs dnfc Sigmoid β=100 | 5.00×10⁻⁵ | 5×10⁻⁶ | 1×10⁻⁴ | **PASS** (all types) |
+| cosivina-python Sigmoid β=100 vs dnfc Sigmoid β=100 | 5.00×10⁻⁵ | 5×10⁻⁶ | 1×10⁻⁴ | **PASS** (all types) |
+| cosivina-python β=100 vs Cosivina β=100 | 1.0×10⁻¹³ | 1×10⁻¹⁵ | 1×10⁻⁴ | **PASS** (all types) |
+| Cedar AbsSigmoid vs dnfc AbsSigmoid | 1.00×10⁻⁴ (non-memory) | 1×10⁻⁵ | 2×10⁻⁴ | **PASS** 4/5; memory float32-limited |
+| Cedar Heaviside vs dnfc Heaviside | 1.00×10⁻⁴ (non-memory) | 1×10⁻⁵ | 2×10⁻⁴ | **PASS** 4/5; memory float32-limited |
 
-The two float64 frameworks are algebraically equivalent in 2D to 5×10⁻⁵. Cedar (float32) vs dnfc agree to ≤1×10⁻⁴ for detection, selection, insufficient, and multi-peak; only the **memory** architecture exceeds the threshold (up to ~2.9), where the self-sustaining bistable bump's steep 2D activation perimeter amplifies the float32/float64 difference at edge cells — the bumps still match in location, peak, and size.
+All three float64 pairs are algebraically equivalent in 2D to 5×10⁻⁵ across **every** architecture, including memory. Cedar (float32) vs dnfc agree to ≤1×10⁻⁴ for detection, selection, insufficient, and multi-peak; only the **memory** architecture exceeds the threshold. There all 20 memory sims deviate, ~10 by a full perimeter ring — the self-sustaining bistable bump locks into a *different radius* in float32 vs float64 (e.g. 177 vs 164 cells), giving field-wide differences up to ~2.9. This is intrinsic to float32: a parameter sweep only relocates which sim lands on a ring boundary, and the float64 pairs reproduce the same bumps exactly. It is a precision limitation of Cedar's CV_32F core (hard-wired across ~131 files), not an algorithmic discrepancy; behaviour still agrees 100%.
 
 ### Behavioural reliability
 
-**600 / 600 comparisons (100%)** show qualitative agreement across all frameworks, simulation types, and phases — including the self-sustaining memory bumps.
+**1200 / 1200 comparisons (100%)** show qualitative agreement across all frameworks, simulation types, and phases — including the self-sustaining memory bumps.
 
 See [`cross-platform-validation-2d/README.md`](cross-platform-validation-2d/README.md) for the full 2D design, per-type amplitude rules, and figures.

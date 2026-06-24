@@ -412,10 +412,19 @@ for (i in seq_along(same_family_pairs)) {
 }
 
 cat("\n  Interpretation:\n")
-cat("    Cedar (float32) vs dnfc (float64): deviations capped at float32 rounding\n")
-cat("    (~1e-4 ULP ceiling). 99.5% of row comparisons fall below this ceiling.\n")
-cat("    Cosivina vs dnfc (both float64): max deviation 5e-5, all below 1e-4,\n")
-cat("    consistent with independent ODE integration over 500 steps.\n\n")
+cat("    Cosivina / cosivina-python vs dnfc (all float64): max deviation 5e-5, all\n")
+cat("    below 1e-4 across ALL 100 sims and 5 types, including memory -> algebraically\n")
+cat("    equivalent. cosivina-python vs Cosivina agree to ~1e-13.\n")
+cat("    Cedar (float32) vs dnfc (float64): PASS for detection, selection,\n")
+cat("    insufficient, multi_peak (<=1e-4). The MEMORY architecture is the sole\n")
+cat("    exception: all 20 memory sims exceed 2e-4. ~10 of them diverge by a full\n")
+cat("    perimeter ring (the self-sustaining bistable bump settles at a different\n")
+cat("    radius in float32 vs float64), giving field-wide deviations up to ~2.9; the\n")
+cat("    rest deviate ~0.06-0.12 at the bump rim. This is intrinsic to float32 (a\n")
+cat("    parameter sweep over global inhibition and inhibitory amplitude only moves\n")
+cat("    which sim lands on a ring boundary, never removes it) and the float64 pairs\n")
+cat("    reproduce each other exactly there - so it is a precision limitation of\n")
+cat("    Cedar's CV_32F core, not an algorithmic discrepancy. Behaviour agrees 100%.\n\n")
 
 # ── 2. Behavioural reliability (qualitative agreement across all 100 sims) ──
 
@@ -471,12 +480,12 @@ cross %>%
 
 cat("\n  Interpretation:\n")
 cat("    AbsSigmoid (Cedar) and logistic sigmoid (Cosivina) belong to different\n")
-cat("    families. Their bump profiles differ in width near the activation boundary.\n")
-cat("    For detection/selection/insufficient/multi-peak: median max|Δu| ≈ 0.005–0.009.\n")
-cat("    For memory: deviations up to ~1.7 occur in 2/20 sims (050, 053) that have\n")
-cat("    weak inhibition, producing wider bumps with broader transition zones where\n")
-cat("    the sigmoid shape matters most. Both frameworks consistently exhibit\n")
-cat("    the same qualitative behaviour in these cases.\n\n")
+cat("    families AND differ in precision (float32 vs float64), so this pair is the\n")
+cat("    loosest comparison. For detection/insufficient/multi-peak the median\n")
+cat("    max|Δu| is small (~0.005-0.009); selection and memory are larger because the\n")
+cat("    bistable bump's radius is sensitive to both the activation-function shape and\n")
+cat("    float32 rounding (see the same-family memory note above). All cases agree\n")
+cat("    qualitatively (same bump/no-bump state).\n\n")
 
 # ── 4. Precision tier table ─────────────────────────────────────────────────
 
