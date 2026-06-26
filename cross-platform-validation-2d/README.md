@@ -54,7 +54,7 @@ self-sustaining memory bumps.
 | Cosivina Sigmoid vs dnfc Sigmoid | 5.0×10⁻⁵ | 5×10⁻⁶ | 1×10⁻⁴ | **PASS** (all types) |
 | cosivina-python Sigmoid vs dnfc Sigmoid | 5.0×10⁻⁵ | 5×10⁻⁶ | 1×10⁻⁴ | **PASS** (all types) |
 | cosivina-python Sigmoid vs Cosivina Sigmoid | 1.0×10⁻¹³ | 1×10⁻¹⁵ | 1×10⁻⁴ | **PASS** (all types) |
-| Cedar AbsSigmoid vs dnfc AbsSigmoid | 2.89 (memory only) | 1×10⁻⁵ | 2×10⁻⁴ | **PASS** 4/5 types; memory: float32 limit (see note) |
+| Cedar AbsSigmoid vs dnfc AbsSigmoid | 3.31 (memory only) | 1×10⁻⁵ | 2×10⁻⁴ | **PASS** 4/5 types; memory: float32 limit (see note) |
 | Cedar Heaviside vs dnfc Heaviside | 1.03 (memory only) | 1×10⁻⁵ | 2×10⁻⁴ | **PASS** 4/5 types; memory: float32 limit (see note) |
 
 - **All three float64 pairs are algebraically equivalent in 2D** to 5×10⁻⁵ across **every** sim
@@ -66,20 +66,28 @@ self-sustaining memory bumps.
   multi-peak** (max ≤ 1×10⁻⁴). The **memory architecture is the sole exception**: **all 20 memory
   sims exceed the 2×10⁻⁴ threshold** (both Cedar pairs, both phases — 80 comparisons). Of these,
   **~10 diverge by a full perimeter ring** — the self-sustaining bistable bump settles at a
-  *different radius* in float32 vs float64 (e.g. sim 050: Cedar 177 cells vs dnfc 164; heaviside
-  041–043: 137 vs 121), producing **field-wide** deviations up to **2.89**. The remaining memory
+  *different radius* in float32 vs float64 (e.g. sim 050: Cedar 177 cells vs dnfc 166; heaviside
+  041–043: 137 vs 121), producing **field-wide** deviations up to **3.31**. The remaining memory
   comparisons differ by ~0.06–0.12 at the bump rim.
-- This is **intrinsic to float32, not tunable and not a bug.** A parameter sweep (global inhibition
-  −0.05→−0.18; inhibitory amplitude ×2.5→×4.0) only **relocates** which sim's equilibrium radius
-  lands on a ring boundary — it never eliminates the divergence, and stronger settings instead
-  collapse the weaker bumps' self-sustain. Because the bistable bump radius is effectively
-  quantized (a whole ring of cells switches at once), for any parameter set some sim sits within
-  float32 epsilon of a ring boundary and tips the opposite way from float64. The float64 pairs
-  agree to 5×10⁻⁵ on these *same* sims, so the cause is precision, not the architecture. **Removing
-  it would require running Cedar's core in CV_64F (CV_32F is hard-wired across ~131 Cedar source
-  files), i.e. a non-standard double-precision build — float32 is Cedar's actual design choice, so
-  we report it rather than fork the library.** Behaviour agrees **100%** (every memory bump is
-  present and centred identically in all frameworks).
+- This is **intrinsic to Cedar's precision/convolution path, not tunable and not a bug.** A
+  parameter sweep (global inhibition −0.05→−0.18; inhibitory amplitude ×2.5→×4.0) only **relocates**
+  which sim's equilibrium radius lands on a ring boundary — it never eliminates the divergence, and
+  stronger settings instead collapse the weaker bumps' self-sustain. The bistable bump radius is
+  effectively quantized (a whole ring of cells switches at once), so for any parameter set some sim
+  sits within epsilon of a ring boundary and a tiny perturbation tips it. The float64 pairs agree to
+  5×10⁻⁵ on these *same* sims, so the cross-framework cause is **precision, not the architecture**.
+- **Is it the activation function?** Investigated and ruled out as the cross-framework cause. Cedar's
+  and dnfc's AbsSigmoid are the **identical double-precision formula**
+  (`0.5(1+β(x−θ)/(1+β|x−θ|))`, source-verified), and holding the function fixed (AbsSig vs AbsSig,
+  HV vs HV) Cedar's bump is **still a ring larger** than dnfc's on the sensitive sims — that residual
+  is precision + Cedar's CV_32F truncated OpenCV convolution (`copyMakeBorder` + `filter2D` each
+  step). The function *choice* **does** change bump size (within both frameworks, Heaviside yields a
+  larger bump than AbsSigmoid on ring-sensitive sims), but it is a *separate, compounding* effect,
+  not the reason the frameworks differ. See `../.claude/cedar-notes.md` for the decomposition table.
+- **Removing the cross-framework gap** would require running Cedar's core in CV_64F (CV_32F is
+  hard-wired across ~131 Cedar source files), i.e. a non-standard double-precision build — float32 is
+  Cedar's actual design choice, so we report it rather than fork the library. Behaviour agrees
+  **100%** (every memory bump is present and centred identically in all frameworks).
 
 See `fig_difference_2d.pdf` for the per-type Cedar−dnfc difference maps (after the +1,+1 offset
 correction) and `fig_fields_2d.pdf` for representative 2D fields.

@@ -1,0 +1,262 @@
+// cedar_benchmark_2d — headless 2D timing benchmark for Cedar DFT computation.
+//
+// Drives the REAL Cedar library: builds an architecture of N independent 2D
+// neural fields (each: 1 GaussInput + 1 NeuralField with a lateral Gauss kernel)
+// on a fixed 50x50 grid by generating a Cedar JSON and loading it with
+// cedar::proc::Group::readJson, then times stepping the fields. No field
+// equations are reimplemented.
+//
+// 2D counterpart of benchmark.cpp (Plan 01 real-API benchmark). Same protocol
+// and per-field architecture, promoted to 2D.
+//
+// Build: registered via cedar_add_executable in the sibling CMakeLists.txt.
+//
+// Usage: benchmark_2d [output_csv]
+//   output_csv defaults to "timings-cedar-2d.csv"
+//
+// Output rows (no header): cedar,headless,<N>,<run>,<steps_per_second>
+
+#include "cedar/processing/Group.h"
+#include "cedar/processing/StepTime.h"
+#include "cedar/dynamics/fields/NeuralField.h"
+#include "cedar/auxiliaries/GlobalClock.h"
+#include "cedar/units/Time.h"
+#include "cedar/units/prefixes.h"
+
+#include <QCoreApplication>
+#include <opencv2/core.hpp>
+
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace fs = std::filesystem;
+
+// Protocol / field constants (match the 2D benchmark spec: 50x50 grid).
+static constexpr int    GRID         = 50;
+static constexpr double TAU          = 25.0;
+static constexpr double BETA         = 100.0;
+static constexpr int    WARMUP_STEPS = 200;
+static constexpr int    TIMED_STEPS  = 5000;
+static constexpr int    N_RUNS       = 10;
+
+static const cedar::unit::Time STEP_TIME(25.0 * cedar::unit::milli * cedar::unit::second);
+
+// ---------------------------------------------------------------------------
+// Architecture definitions (2D) — representative validation sim of each band
+// with the 2D amplitude adjustments from generate_simulations_2d.py (positions
+// halved; selection kernel amp x4; memory exc/inh x2.5 + global -0.05).
+// ---------------------------------------------------------------------------
+
+enum class KernelType { Gauss, MexicanHat };
+
+struct Stim { double amp, sigma, pos; };
+
+struct Arch {
+    std::string name;
+    double      h;
+    KernelType  kernel;
+    double      kSigma, kAmp, kGlobal;
+    double      kSigmaExc, kAmpExc, kSigmaInh, kAmpInh, kGlobalMex;
+    std::vector<Stim> stimuli;
+};
+
+static const Arch& get_arch(const std::string& name)
+{
+    static const std::vector<Arch> archs = {
+        {"detection",    -8.0,  KernelType::Gauss,      3.0, 8.0, 0.0,   0,0,0,0,0,
+            {{12.0, 5.0, 25.0}}},
+        {"selection",   -10.0,  KernelType::Gauss,      3.0, 20.0, -0.15, 0,0,0,0,0,
+            {{10.0, 5.0, 12.5}, {10.5, 5.0, 37.5}}},
+        {"memory",       -5.0,  KernelType::MexicanHat, 0,0,0,
+            3.4, 44.25, 8.9, 33.75, -0.05,
+            {{15.0, 5.0, 25.0}}},
+        {"insufficient",-12.0,  KernelType::Gauss,      3.0, 3.0, 0.0,   0,0,0,0,0,
+            {{5.0, 5.0, 25.0}}},
+        {"multi-peak",   -8.0,  KernelType::Gauss,      2.0, 5.0, 0.0,   0,0,0,0,0,
+            {{12.0, 5.0, 12.5}, {12.0, 5.0, 37.5}}},
+    };
+    for (const auto& a : archs)
+        if (a.name == name) return a;
+    std::fprintf(stderr, "Unknown arch '%s'; defaulting to detection\n", name.c_str());
+    return archs[0];
+}
+
+// ---------------------------------------------------------------------------
+// Architecture JSON generation (N independent 2D fields)
+// ---------------------------------------------------------------------------
+
+// 2D lateral-kernels block: single Gauss, or dual Gauss for Mexican-hat.
+static std::string lateral_kernels_block_2d(const Arch& arch)
+{
+    std::ostringstream k;
+    if (arch.kernel == KernelType::Gauss) {
+        k << "{\"cedar.aux.kernel.Gauss\": {\n"
+             "                \"dimensionality\": \"2\", \"anchor\": [\"0\", \"0\"], \"amplitude\": \"" << arch.kAmp << "\",\n"
+             "                \"sigmas\": [\"" << arch.kSigma << "\", \"" << arch.kSigma << "\"], \"normalize\": \"true\", \"shifts\": [\"0\", \"0\"], \"limit\": \"10\"\n"
+             "            }}";
+    } else {
+        k << "{\n"
+             "                \"cedar.aux.kernel.Gauss\": {\n"
+             "                    \"dimensionality\": \"2\", \"anchor\": [\"0\", \"0\"], \"amplitude\": \"" << arch.kAmpExc << "\",\n"
+             "                    \"sigmas\": [\"" << arch.kSigmaExc << "\", \"" << arch.kSigmaExc << "\"], \"normalize\": \"true\", \"shifts\": [\"0\", \"0\"], \"limit\": \"10\"\n"
+             "                },\n"
+             "                \"cedar.aux.kernel.Gauss\": {\n"
+             "                    \"dimensionality\": \"2\", \"anchor\": [\"0\", \"0\"], \"amplitude\": \"-" << arch.kAmpInh << "\",\n"
+             "                    \"sigmas\": [\"" << arch.kSigmaInh << "\", \"" << arch.kSigmaInh << "\"], \"normalize\": \"true\", \"shifts\": [\"0\", \"0\"], \"limit\": \"10\"\n"
+             "                }\n"
+             "            }";
+    }
+    return k.str();
+}
+
+static std::string build_architecture_json(int n, const Arch& arch)
+{
+    const std::string lateral = lateral_kernels_block_2d(arch);
+    const std::string global_inh =
+        (arch.kernel == KernelType::Gauss && arch.kGlobal != 0.0)
+            ? std::to_string(arch.kGlobal)
+            : (arch.kernel == KernelType::MexicanHat && arch.kGlobalMex != 0.0)
+                ? std::to_string(arch.kGlobalMex) : "0";
+
+    std::ostringstream steps, conns;
+    bool first_step = true, first_conn = true;
+    for (int i = 0; i < n; ++i) {
+        const std::string nf = "Neural Field " + std::to_string(i);
+
+        for (size_t s = 0; s < arch.stimuli.size(); ++s) {
+            const Stim& st = arch.stimuli[s];
+            const std::string gi =
+                "Gauss Input " + std::to_string(i) + "_" + std::to_string(s);
+            if (!first_step) steps << ",\n"; first_step = false;
+            steps <<
+              "        \"cedar.processing.sources.GaussInput\": {\n"
+              "            \"name\": \"" << gi << "\",\n"
+              "            \"dimensionality\": \"2\", \"sizes\": [\"" << GRID << "\", \"" << GRID << "\"],\n"
+              "            \"amplitude\": \"" << st.amp << "\", \"centers\": [\"" << st.pos << "\", \"" << st.pos << "\"],\n"
+              "            \"sigma\": [\"" << st.sigma << "\", \"" << st.sigma << "\"], \"cyclic\": \"true\", \"comments\": \"\"\n"
+              "        }";
+            if (!first_conn) conns << ",\n"; first_conn = false;
+            conns <<
+              "        {\"source\": \"" << gi << ".Gauss input\", \"target\": \"" << nf << ".input\"}";
+        }
+
+        if (!first_step) steps << ",\n"; first_step = false;
+        steps <<
+          "        \"cedar.dynamics.NeuralField\": {\n"
+          "            \"name\": \"" << nf << "\",\n"
+          "            \"dimensionality\": \"2\", \"sizes\": [\"" << GRID << "\", \"" << GRID << "\"],\n"
+          "            \"time scale\": \"" << TAU << "\", \"resting level\": \"" << arch.h << "\",\n"
+          "            \"input noise gain\": \"0\",\n"
+          "            \"sigmoid\": {\"type\": \"cedar.aux.math.AbsSigmoid\", \"threshold\": \"0\", \"beta\": \"" << BETA << "\"},\n"
+          "            \"global inhibition\": \"" << global_inh << "\",\n"
+          "            \"lateral kernels\": " << lateral << ",\n"
+          "            \"lateral kernel convolution\": {\n"
+          "                \"engine\": {\"type\": \"cedar.aux.conv.OpenCV\"},\n"
+          "                \"borderType\": \"Cyclic\", \"mode\": \"Same\", \"alternate even kernel center\": \"false\"\n"
+          "            },\n"
+          "            \"comments\": \"\"\n"
+          "        }";
+    }
+
+    std::ostringstream triggers;
+    triggers << "    \"triggers\": {\"cedar.processing.LoopedTrigger\": {\n"
+                "        \"name\": \"LoopedTrigger\", \"fake euler step\": \"false\",\n"
+                "        \"loop mode\": \"0\", \"step size\": \"1\", \"Steps\": {";
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) triggers << ", ";
+        triggers << "\"Neural Field " << i << "\": {}";
+    }
+    triggers << "}\n    }}";
+
+    std::ostringstream json;
+    json << "{\n    \"meta\": {\"format\": \"1\"},\n"
+         << "    \"steps\": {\n" << steps.str() << "\n    },\n"
+         << triggers.str() << ",\n"
+         << "    \"connections\": [\n" << conns.str() << "\n    ],\n"
+         << "    \"records\": {}, \"ui\": {}, \"ui view\": {}, \"ui generic\": {}\n}";
+    return json.str();
+}
+
+// ---------------------------------------------------------------------------
+// Benchmark one N value
+// ---------------------------------------------------------------------------
+
+static void run_benchmark(int n, const Arch& arch, const std::string& outfile)
+{
+    const fs::path tmp = fs::temp_directory_path() /
+        ("cedar_bench2d_" + arch.name + "_N" + std::to_string(n) + ".json");
+    { std::ofstream f(tmp); f << build_architecture_json(n, arch); }
+
+    cedar::proc::GroupPtr group(new cedar::proc::Group());
+    group->readJson(tmp.string());
+
+    std::vector<cedar::dyn::NeuralFieldPtr> fields;
+    for (const auto& name_element : group->getElements()) {
+        auto f = boost::dynamic_pointer_cast<cedar::dyn::NeuralField>(name_element.second);
+        if (f) fields.push_back(f);
+    }
+
+    auto clock = cedar::aux::GlobalClockSingleton::getInstance();
+    auto step_all = [&]() {
+        clock->addTime(STEP_TIME);
+        cedar::proc::ArgumentsPtr args(new cedar::proc::StepTime(STEP_TIME, clock->getTime()));
+        for (auto& f : fields) f->onTrigger(args, cedar::proc::TriggerPtr());
+    };
+
+    for (int t = 0; t < WARMUP_STEPS; ++t) step_all();
+
+    std::FILE* fp = std::fopen(outfile.c_str(), "a");
+    if (!fp) { std::fprintf(stderr, "Cannot open %s\n", outfile.c_str()); return; }
+
+    for (int run = 1; run <= N_RUNS; ++run) {
+        auto t0 = std::chrono::high_resolution_clock::now();
+        for (int t = 0; t < TIMED_STEPS; ++t) step_all();
+        auto t1 = std::chrono::high_resolution_clock::now();
+
+        const double elapsed = std::chrono::duration<double>(t1 - t0).count();
+        const double sps     = TIMED_STEPS / elapsed;
+        std::fprintf(fp,  "cedar,%s,headless,%d,%d,%.2f\n", arch.name.c_str(), n, run, sps);
+        std::printf("cedar 2D %-12s N=%4d run=%d  %.1f steps/s\n", arch.name.c_str(), n, run, sps);
+    }
+    std::fclose(fp);
+    std::error_code ec; fs::remove(tmp, ec);
+}
+
+int main(int argc, char* argv[])
+{
+    QCoreApplication app(argc, argv);
+    cv::setNumThreads(0);   // force single-threaded OpenCV convolution (fair single-thread timing)
+    cedar::aux::GlobalClockSingleton::getInstance()->start();
+
+    // Usage: benchmark_2d [output_csv] [arch] [N_csv]
+    const std::string outfile  = (argc > 1) ? argv[1] : "timings-cedar-2d.csv";
+    const std::string archName = (argc > 2) ? argv[2] : "detection";
+    const Arch& arch = get_arch(archName);
+
+    std::vector<int> Ns;
+    if (argc > 3) {
+        std::string s = argv[3];
+        size_t pos = 0;
+        while (pos < s.size()) {
+            size_t comma = s.find(',', pos);
+            std::string tok = s.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+            if (!tok.empty()) Ns.push_back(std::stoi(tok));
+            if (comma == std::string::npos) break;
+            pos = comma + 1;
+        }
+    } else {
+        Ns = {10, 50, 100, 500, 1000};
+    }
+
+    std::printf("Cedar 2D headless benchmark [arch=%s] (real API, 50x50, cv threads=0) -> %s\n",
+                arch.name.c_str(), outfile.c_str());
+    for (int n : Ns)
+        run_benchmark(n, arch, outfile);
+    return 0;
+}

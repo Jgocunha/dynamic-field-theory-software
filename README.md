@@ -31,7 +31,7 @@ All frameworks implement the 1D Amari equation:
 
 ---
 
-## Benchmark Results
+## Benchmark Results (1D)
 
 Each benchmark creates N independent neural fields and measures wall-clock steps per second (median of 3 runs × 5 000 steps each).
 
@@ -41,20 +41,38 @@ Each benchmark creates N independent neural fields and measures wall-clock steps
 |---|---:|---:|---:|---:|---:|
 | Cedar | 3 056 | 610 | 297 | 49 | 25 |
 | Cosivina | 2 443 | 496 | 244 | 46 | 22 |
-| cosivina-python | 2 091 | 426 | 209 | 42 | 20 |
-| dnfc | 8 190 | 1 601 | 794 | 142 | 70 |
+| cosivina-python | 6 965 | 1 300 | 553 | 103 | 50 |
+| dnfc | 67 098 | 12 654 | 6 355 | 1 059 | 416 |
 
 ### Speedup relative to Cosivina
 
 | N | dnfc | Cedar | cosivina-python |
 |---|---:|---:|---:|
-| 10 | 3.35× | 1.25× | 0.86× |
-| 50 | 3.23× | 1.23× | 0.86× |
-| 100 | 3.25× | 1.22× | 0.86× |
-| 500 | 3.12× | 1.08× | 0.92× |
-| 1000 | 3.13× | 1.12× | 0.92× |
+| 10 | 27.5× | 1.25× | 2.85× |
+| 50 | 25.5× | 1.23× | 2.62× |
+| 100 | 26.0× | 1.22× | 2.27× |
+| 500 | 23.0× | 1.07× | 2.24× |
+| 1000 | 18.9× | 1.14× | 2.27× |
 
-**dnfc is consistently the fastest** (~3.1–3.4× Cosivina). Cedar is modestly faster than Cosivina (~1.1–1.25×, narrowing at large N); cosivina-python runs at ~86–92% of Cosivina speed. Cedar is run through its real library API (OpenCV `CV_32F` convolution), so these figures reflect the full framework overhead. See [`benchmarking/README.md`](benchmarking/README.md) for the full methodology and statistical breakdown.
+**dnfc is by far the fastest** (~19–27× Cosivina, ~17–22× Cedar) after its AVX2 convolution/sigmoid optimization, with **numba-JIT cosivina-python second** (~2.2–2.85× Cosivina). Cedar is modestly faster than Cosivina (~1.1–1.25×, narrowing at large N). Cedar is run through its real library API (OpenCV `CV_32F` convolution), so these figures reflect the full framework overhead. (dnfc figures are the optimized build; the other three are unchanged. cosivina-python is benchmarked on its numba path; the validation suite uses the slower pure-Python path.) See [`benchmarking/README.md`](benchmarking/README.md) for the full methodology and statistical breakdown.
+
+---
+
+## Benchmark Results (2D)
+
+The same N-sweep on **2D (50×50) fields** (2500 cells vs 100 in 1D), where the lateral convolution dominates each step. Run over dnfc, Cedar, and cosivina-python (numba); **Cosivina/MATLAB pending**.
+
+### Steps per second
+
+| Framework | N=10 | N=50 | N=100 | N=500 | N=1000 |
+|---|---:|---:|---:|---:|---:|
+| dnfc | 2 671 | 436 | 194 | 40 | — † |
+| Cedar | 1 545 | 297 | 144 | 27 | 14 |
+| cosivina-python | 317 | 54 | 29 | 6 | 3 |
+
+† dnfc N=1000 not run this round (2D sweep capped at N=500).
+
+**dnfc is fastest in 2D after its convolution optimization.** Earlier builds had dnfc as the *slowest* 2D framework (its scalar separable convolution did not scale to 2500-cell fields). The AVX2-vectorized 2D convolution raised dnfc 2D throughput ~8–10× (N=10: 253 → 2 671 sps), so dnfc now leads at every measured N — **~1.4–1.7× faster than Cedar** and ~7–8× faster than numba cosivina-python. The lead over Cedar is much narrower than in 1D (~17–22×) because the SIMD convolution is a larger share of the 2D step (Cedar also uses OpenCV SIMD). See [`benchmarking-2d/README.md`](benchmarking-2d/README.md) for the full breakdown and the [dnfc 2D-convolution optimization plan](.claude/plans/dnfc-2d-convolution-optimization.md) (implemented).
 
 ---
 
@@ -96,7 +114,7 @@ The same 100-simulation, 5-architecture suite was run on **2D (50×50) fields** 
 | Cedar AbsSigmoid vs dnfc AbsSigmoid | 1.00×10⁻⁴ (non-memory) | 1×10⁻⁵ | 2×10⁻⁴ | **PASS** 4/5; memory float32-limited |
 | Cedar Heaviside vs dnfc Heaviside | 1.00×10⁻⁴ (non-memory) | 1×10⁻⁵ | 2×10⁻⁴ | **PASS** 4/5; memory float32-limited |
 
-All three float64 pairs are algebraically equivalent in 2D to 5×10⁻⁵ across **every** architecture, including memory. Cedar (float32) vs dnfc agree to ≤1×10⁻⁴ for detection, selection, insufficient, and multi-peak; only the **memory** architecture exceeds the threshold. There all 20 memory sims deviate, ~10 by a full perimeter ring — the self-sustaining bistable bump locks into a *different radius* in float32 vs float64 (e.g. 177 vs 164 cells), giving field-wide differences up to ~2.9. This is intrinsic to float32: a parameter sweep only relocates which sim lands on a ring boundary, and the float64 pairs reproduce the same bumps exactly. It is a precision limitation of Cedar's CV_32F core (hard-wired across ~131 files), not an algorithmic discrepancy; behaviour still agrees 100%.
+All three float64 pairs are algebraically equivalent in 2D to 5×10⁻⁵ across **every** architecture, including memory. Cedar (float32) vs dnfc agree to ≤1×10⁻⁴ for detection, selection, insufficient, and multi-peak; only the **memory** architecture exceeds the threshold. There all 20 memory sims deviate, ~10 by a full perimeter ring — the self-sustaining bistable bump locks into a *different radius* in float32 vs float64 (e.g. 177 vs 166 cells), giving field-wide differences up to ~3.3. This is a precision effect, not an algorithmic one: a parameter sweep only relocates which sim lands on a ring boundary, and the float64 pairs reproduce the same bumps exactly. We checked whether the activation function is responsible — it is not the cross-framework cause: Cedar's and dnfc's AbsSigmoid are the identical double formula, and with the function held fixed Cedar's bump is still a ring larger (the residual is Cedar's CV_32F truncated OpenCV convolution). The function *choice* does affect bump size, but as a separate, compounding effect. See [`cross-platform-validation-2d/README.md`](cross-platform-validation-2d/README.md) and `.claude/cedar-notes.md` for the full decomposition. Behaviour still agrees 100%.
 
 ### Behavioural reliability
 
