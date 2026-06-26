@@ -20,14 +20,24 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "cosivina_python"))
 
-from cosivina.nonumba import (
-    Simulator,
-    GaussStimulus1D,
-    SumInputs,
-    NeuralField,
-    GaussKernel1D,
-    LateralInteractions1D,
+# Variant selection: "numba" (JIT) or "nonumba" (pure NumPy). Chosen from argv in
+# main(); imported here as module globals so run_sim() can use the classes.
+VARIANT = sys.argv[1] if len(sys.argv) > 1 else "nonumba"
+if VARIANT not in ("numba", "nonumba"):
+    print(f"Unknown variant '{VARIANT}'; defaulting to nonumba")
+    VARIANT = "nonumba"
+
+_mod = __import__(
+    "cosivina.numba" if VARIANT == "numba" else "cosivina.nonumba",
+    fromlist=["Simulator", "GaussStimulus1D", "SumInputs",
+              "NeuralField", "GaussKernel1D", "LateralInteractions1D"],
 )
+Simulator            = _mod.Simulator
+GaussStimulus1D      = _mod.GaussStimulus1D
+SumInputs            = _mod.SumInputs
+NeuralField          = _mod.NeuralField
+GaussKernel1D        = _mod.GaussKernel1D
+LateralInteractions1D = _mod.LateralInteractions1D
 
 # ---------------------------------------------------------------------------
 # Parameter table (matches generate_simulations.py exactly)
@@ -298,8 +308,9 @@ def run_sim(sim_params: dict, output_dir: str) -> None:
 
 def main():
     root = Path(__file__).resolve().parent.parent
-    out_dir = root / "data" / "cosivina-python"
+    out_dir = root / "data" / f"cosivina-python-{VARIANT}"
     out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"cosivina-python variant: {VARIANT}  ->  {out_dir}")
 
     n_ok = 0
     n_failed = 0

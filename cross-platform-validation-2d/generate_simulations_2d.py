@@ -91,10 +91,12 @@ def to_2d_params(sim: dict) -> dict:
     return s
 
 
+# Per-variant simulation folders (see generate_simulations.py for the rationale).
 COSIVINA_DIR        = ROOT / "simulations" / "cosivina"
 COSIVINA_PYTHON_DIR = ROOT / "simulations" / "cosivina-python"
 DNFC_DIR            = ROOT / "simulations" / "dnfc"
-CEDAR_DIR           = ROOT / "simulations" / "cedar"
+CEDAR_OPENCV_DIR    = ROOT / "simulations" / "cedar-opencv"
+CEDAR_FFTW_DIR      = ROOT / "simulations" / "cedar-fftw"
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +173,7 @@ def build_dnfc_json_2d(sim: dict, act_fn: str) -> dict:
 # Cedar JSON generator (2D) — drives the real Cedar API (see plan 01 / cedar-notes.md)
 # ---------------------------------------------------------------------------
 
-def build_cedar_json_2d(sim: dict, act_fn: str) -> str:
+def build_cedar_json_2d(sim: dict, act_fn: str, engine: str = "cedar.aux.conv.OpenCV") -> str:
     k = sim["kernel"]
     n_stim = len(sim["stimuli"])
     sig_block = json.dumps(cedar_sigmoid(act_fn))
@@ -263,7 +265,7 @@ def build_cedar_json_2d(sim: dict, act_fn: str) -> str:
             "global inhibition": "{global_inh}",
             "lateral kernels": {lateral_kernels},
             "lateral kernel convolution": {{
-                "engine": {{"type": "cedar.aux.conv.OpenCV"}},
+                "engine": {{"type": "{engine}"}},
                 "borderType": "Cyclic",
                 "mode": "Same",
                 "alternate even kernel center": "false"
@@ -469,10 +471,17 @@ _COSIVINA_PYTHON_ROOT = Path(__file__).resolve().parents[4] / "cosivina_python"
 if str(_COSIVINA_PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(_COSIVINA_PYTHON_ROOT))
 
-from cosivina.nonumba import (
-    Simulator, GaussStimulus2D, SumInputs,
-    NeuralField, GaussKernel2D, LateralInteractions2D,
+# Variant selected by the runner via the COSIVINA_VARIANT env var ("numba" |
+# "nonumba"); defaults to nonumba for standalone execution. The two variants share
+# this file — only the imported backend differs.
+_variant = os.environ.get("COSIVINA_VARIANT", "nonumba")
+_mod = __import__(
+    "cosivina.numba" if _variant == "numba" else "cosivina.nonumba",
+    fromlist=["Simulator", "GaussStimulus2D", "SumInputs",
+              "NeuralField", "GaussKernel2D", "LateralInteractions2D"],
 )
+Simulator, GaussStimulus2D, SumInputs = _mod.Simulator, _mod.GaussStimulus2D, _mod.SumInputs
+NeuralField, GaussKernel2D, LateralInteractions2D = _mod.NeuralField, _mod.GaussKernel2D, _mod.LateralInteractions2D
 
 FIELD_SIZE = ({FIELD}, {FIELD})
 TAU        = {TAU}
@@ -528,6 +537,10 @@ def main():
     cosivina_out        = str(ROOT / "data" / "cosivina")
     cosivina_python_out = str(ROOT / "data" / "cosivina-python")
 
+    for d in (COSIVINA_DIR, COSIVINA_PYTHON_DIR, DNFC_DIR,
+              CEDAR_OPENCV_DIR, CEDAR_FFTW_DIR):
+        d.mkdir(parents=True, exist_ok=True)
+
     n_written = 0
     for sim_1d in SIMS:
         sim = to_2d_params(sim_1d)   # apply per-type 2D amplitude adjustment
@@ -547,15 +560,20 @@ def main():
             n_written += 1
 
         for afn in cedar_act_fns:
-            (CEDAR_DIR / f"sim_{sid}_{afn}.json").write_text(
-                build_cedar_json_2d(sim, afn), encoding="utf-8")
-            n_written += 1
+            for cedar_dir, engine in (
+                (CEDAR_OPENCV_DIR, "cedar.aux.conv.OpenCV"),
+                (CEDAR_FFTW_DIR,   "cedar.aux.conv.FFTW"),
+            ):
+                (cedar_dir / f"sim_{sid}_{afn}.json").write_text(
+                    build_cedar_json_2d(sim, afn, engine=engine), encoding="utf-8")
+                n_written += 1
 
     print(f"Written {n_written} 2D simulation files.")
     print(f"  cosivina:        {len(SIMS)} .m files")
     print(f"  cosivina-python: {len(SIMS)} .py files")
     print(f"  dnfc:            {len(SIMS) * len(dnfc_act_fns)} .json files")
-    print(f"  cedar:           {len(SIMS) * len(cedar_act_fns)} .json files")
+    print(f"  cedar-opencv:    {len(SIMS) * len(cedar_act_fns)} .json files")
+    print(f"  cedar-fftw:      {len(SIMS) * len(cedar_act_fns)} .json files")
 
 
 if __name__ == "__main__":

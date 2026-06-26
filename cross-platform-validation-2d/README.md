@@ -1,74 +1,110 @@
 # 2D Cross-Platform Validation
 
 The 2D counterpart of [`../cross-platform-validation/`](../cross-platform-validation/). It runs the
-**same 100-simulation, 5-architecture test suite** on **2D (50×50) fields** across the four DFT
-frameworks and checks **algebraic equivalence** (same activation-function family agrees to numerical
-precision) and **behavioural reliability** (qualitative bump/no-bump state agrees).
+**same 100-simulation, 5-architecture test suite** on **2D (50×50) fields** across the DFT
+framework **variants** and checks **algebraic equivalence** (same activation-function family agrees
+to numerical precision) and **behavioural reliability** (qualitative bump/no-bump state agrees).
 
-**Frameworks compared:** Cedar (C++, float32), Cosivina (MATLAB, float64), cosivina-python
-(Python/NumPy, float64), dnfc (C++, float64) — same as 1D.
+**Variants compared (6):** Cedar-OpenCV, Cedar-FFTW (C++, float32), Cosivina (MATLAB, float64),
+cosivina-python-numba, cosivina-python-nonumba (Python, float64), dnfc (C++, float64) — same
+folder convention as 1D.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
-| `generate_simulations_2d.py` | Generates all 700 2D simulation files (reuses the 1D parameter table; see `test_suite_2d.md`) |
-| `simulations/{dnfc,cedar,cosivina,cosivina-python}/` | Generated 2D simulation definitions |
-| `runners/` | One runner per framework (see below) |
-| `data/{...}/` | Output: one row of 2500 row-major-flattened activation values per sim × phase |
+| `generate_simulations_2d.py` | Generates all 900 2D simulation files (reuses the 1D parameter table; see `test_suite_2d.md`) |
+| `simulations/{cedar-opencv,cedar-fftw,cosivina,cosivina-python,dnfc}/` | Generated 2D simulation definitions (cosivina-python shared by both py variants) |
+| `runners/<variant>/run.ps1` | Per-variant runner wrapper (cosivina via `cosivina_runner_2d.m`) |
+| `data/<variant>/` | Output: one row of 2500 row-major-flattened activation values per sim × phase |
 | `analysis_2d.R` | Loads all CSVs, computes pairwise deviations, PASS/FAIL + behavioural summary, figures |
 | `test_suite_2d.md` | The 2D parameter mapping and per-type amplitude rules |
 
+### Per-variant counts
+
+| Variant | configs | CSVs (×2 phases) |
+|---|---:|---:|
+| cedar-opencv | 200 | 400 |
+| cedar-fftw | 200 | 400 |
+| cosivina (MATLAB) | 100 | 200 |
+| cosivina-python-numba | 100 (shared) | 200 |
+| cosivina-python-nonumba | 100 (shared) | 200 |
+| dnfc | 300 | 600 |
+
 ## How to reproduce
 
-1. **Generate**: `python generate_simulations_2d.py` → 700 files (300 dnfc JSON, 200 Cedar JSON,
-   100 cosivina `.m`, 100 cosivina-python `.py`).
-2. **Run each framework** (each writes flattened 50×50 CSVs to `data/<framework>/`):
-   - dnfc: build `runners/dnfc_runner_2d/cross_platform_validation_runner_2d.cpp` inside the
-     dnf-composer project (add it to `examples/CMakeLists.txt` via `add_example_executable`), then
-     run it with `<simulations/dnfc> <data/dnfc>`.
-   - Cedar: build `runners/cedar_runner_2d/cross_platform_validation_2d.cpp` inside the Cedar tree
-     (`cedar/executables/cross-platform-validation-2d/`, `cedar_add_executable`); run with the
-     dependency DLLs on PATH (see `../.claude/cedar-notes.md`).
+1. **Generate**: `python generate_simulations_2d.py` → 900 files (300 dnfc JSON, 200 cedar-opencv
+   JSON, 200 cedar-fftw JSON, 100 cosivina `.m`, 100 cosivina-python `.py`).
+2. **Run each variant** (each writes flattened 50×50 CSVs to `data/<variant>/`):
+   - cedar-opencv / cedar-fftw: `runners/cedar-opencv/run.ps1` / `runners/cedar-fftw/run.ps1`
+     (the fftw wrapper adds fftw3.dll to PATH; Cedar must be built with `CEDAR_USE_FFTW=ON`).
+   - dnfc: `runners/dnfc/run.ps1`.
    - cosivina (MATLAB): `run('runners/cosivina_runner_2d.m')`.
-   - cosivina-python: `python runners/cosivina_python_runner_2d.py`.
+   - cosivina-python: `runners/cosivina-python-numba/run.ps1` and `…-nonumba/run.ps1`.
 3. **Analyse**: `Rscript analysis_2d.R` → `analysis_summary.csv`, `validation_summary.csv`, and
    figures (`fig_fields_2d.pdf`, `fig_difference_2d.pdf`, `fig_boxplots.pdf`,
    `fig_deviation_heatmap.pdf`).
 
+### Cedar OpenCV vs FFTW equivalence (2D)
+
+The two Cedar convolution engines are **bit-identical** on detection / selection / insufficient /
+multi-peak (max|Δu| = 0). The **only** divergence is the **memory** architecture: OpenCV keeps the
+self-sustaining bump while FFTW's bump collapses (0% of memory sims pass the 2e-4 gate). This is the
+same precision knife-edge as the Cedar-vs-dnfc memory case — the 2D self-sustaining bump is a
+bistable attractor, and the sub-float32-epsilon difference between the spatial and Fourier
+convolution paths tips it. It is **not** an FFTW bug (1D memory and all other 2D architectures
+agree). See `../.claude/cedar-notes.md`.
+
 ## Results
 
-Behavioural and (float64) algebraic equivalence hold in 2D. Run over all four frameworks
-(dnfc, Cedar, Cosivina, cosivina-python):
+Behavioural and (float64) algebraic equivalence hold in 2D. Run over all six variants
+(Cedar-OpenCV, Cedar-FFTW, Cosivina, cosivina-python-numba, cosivina-python-nonumba, dnfc):
 
 ### Behavioural reliability
 
-**1200 / 1200 comparisons (100%)** agree on the qualitative field state (suprathreshold bump vs.
-subthreshold resting) across all frameworks, architecture types, and phases — including the
-self-sustaining memory bumps.
+**2236 / 2400 comparisons (93.2%)** agree on the qualitative field state (suprathreshold bump vs.
+subthreshold resting) across all 12 same-activation pairs, architecture types, and phases. The
+**164 disagreements are entirely the four Cedar-FFTW-involving memory pairs** (`cedar_*_vs_cedar_fftw`
+and `cedar_fftw_vs_dnfc`, both activation fns) — in 2D the FFTW memory bump **collapses** while the
+OpenCV/dnfc bump survives (0% agreement on memory for those four pairs). Every **non-FFTW** pair —
+including `cedar_opencv_vs_dnfc` and all float64 sigmoid pairs — stays at **100%** behavioural
+agreement, memory bumps included.
 
-### Algebraic equivalence (same activation-function family)
+### Algebraic equivalence (same activation-function family, 12 pairs)
 
-| Comparison pair | Max abs(Δu) | Median | Threshold | Result |
-|---|---:|---:|---:|---|
-| Cosivina Sigmoid vs dnfc Sigmoid | 5.0×10⁻⁵ | 5×10⁻⁶ | 1×10⁻⁴ | **PASS** (all types) |
-| cosivina-python Sigmoid vs dnfc Sigmoid | 5.0×10⁻⁵ | 5×10⁻⁶ | 1×10⁻⁴ | **PASS** (all types) |
-| cosivina-python Sigmoid vs Cosivina Sigmoid | 1.0×10⁻¹³ | 1×10⁻¹⁵ | 1×10⁻⁴ | **PASS** (all types) |
-| Cedar AbsSigmoid vs dnfc AbsSigmoid | 3.31 (memory only) | 1×10⁻⁵ | 2×10⁻⁴ | **PASS** 4/5 types; memory: float32 limit (see note) |
-| Cedar Heaviside vs dnfc Heaviside | 1.03 (memory only) | 1×10⁻⁵ | 2×10⁻⁴ | **PASS** 4/5 types; memory: float32 limit (see note) |
+A quantitative `max|Δu|` test is only run **within** an activation-function family; every C(n,2)
+variant pair is computed → 3 (AbsSig) + 3 (Heaviside) + 6 (Sigmoid) = **12**. Max abs(Δu) is over
+100 sims × 2 phases. Any pair with a Cedar side carries a 2×10⁻⁴ ceiling; all-float64 pairs 1×10⁻⁴.
 
-- **All three float64 pairs are algebraically equivalent in 2D** to 5×10⁻⁵ across **every** sim
-  and type, **including memory** (cosivina ↔ dnfc, cosivina-python ↔ dnfc both 5×10⁻⁵;
-  cosivina-python ↔ cosivina ~1×10⁻¹³). This confirms the 2D separable convolution, border
-  handling, and the self-sustaining bump's attractor are reproduced exactly across independent
-  float64 implementations.
-- **Cedar (float32) vs dnfc (float64)** is **PASS for detection, selection, insufficient, and
-  multi-peak** (max ≤ 1×10⁻⁴). The **memory architecture is the sole exception**: **all 20 memory
-  sims exceed the 2×10⁻⁴ threshold** (both Cedar pairs, both phases — 80 comparisons). Of these,
-  **~10 diverge by a full perimeter ring** — the self-sustaining bistable bump settles at a
-  *different radius* in float32 vs float64 (e.g. sim 050: Cedar 177 cells vs dnfc 166; heaviside
-  041–043: 137 vs 121), producing **field-wide** deviations up to **3.31**. The remaining memory
-  comparisons differ by ~0.06–0.12 at the bump rim.
+| Family | Pair | Max abs(Δu) | Median | Threshold | Result |
+|---|---|---:|---:|---:|---|
+| AbsSig | cedar_opencv_vs_cedar_fftw | 41.4 (memory) | 0 | 2×10⁻⁴ | **FAIL** memory; PASS 4/5 (see note) |
+| AbsSig | cedar_opencv_vs_dnfc | 3.31 (memory) | 1×10⁻⁵ | 2×10⁻⁴ | **FAIL** memory; PASS 4/5 (see note) |
+| AbsSig | cedar_fftw_vs_dnfc | 41.3 (memory) | 1×10⁻⁵ | 2×10⁻⁴ | **FAIL** memory; PASS 4/5 (see note) |
+| Heaviside | cedar_opencv_vs_cedar_fftw | 41.5 (memory) | 0 | 2×10⁻⁴ | **FAIL** memory; PASS 4/5 (see note) |
+| Heaviside | cedar_opencv_vs_dnfc | 1.03 (memory) | 1×10⁻⁵ | 2×10⁻⁴ | **FAIL** memory; PASS 4/5 (see note) |
+| Heaviside | cedar_fftw_vs_dnfc | 41.3 (memory) | 1×10⁻⁵ | 2×10⁻⁴ | **FAIL** memory; PASS 4/5 (see note) |
+| Sigmoid | cosivina_vs_cpy_numba | 1.0×10⁻¹³ | 5×10⁻¹⁶ | 1×10⁻⁴ | **PASS** (all types) |
+| Sigmoid | cosivina_vs_cpy_nonumba | 1.0×10⁻¹³ | 1×10⁻¹⁵ | 1×10⁻⁴ | **PASS** (all types) |
+| Sigmoid | cosivina_vs_dnfc | 5.0×10⁻⁵ | 5×10⁻⁶ | 1×10⁻⁴ | **PASS** (all types) |
+| Sigmoid | cpy_numba_vs_cpy_nonumba | 1.0×10⁻¹³ | 0 | 1×10⁻⁴ | **PASS** (all types) |
+| Sigmoid | cpy_numba_vs_dnfc | 5.0×10⁻⁵ | 5×10⁻⁶ | 1×10⁻⁴ | **PASS** (all types) |
+| Sigmoid | cpy_nonumba_vs_dnfc | 5.0×10⁻⁵ | 5×10⁻⁶ | 1×10⁻⁴ | **PASS** (all types) |
+
+- **All six float64 sigmoid pairs are algebraically equivalent in 2D** to 5×10⁻⁵ across **every** sim
+  and type, **including memory** (cosivina / cosivina-python / dnfc all 5×10⁻⁵; numba↔nonumba and
+  cosivina↔cosivina-python ~1×10⁻¹³). This confirms the 2D separable convolution, border handling,
+  and the self-sustaining bump's attractor are reproduced exactly across independent float64
+  implementations.
+- **Every Cedar-involving pair is PASS for detection, selection, insufficient, and multi-peak**
+  (max ≤ 1×10⁻⁴) and **FAILs only on memory**. There are two distinct memory effects:
+  - **cedar_opencv_vs_dnfc** (float32 vs float64, same OpenCV engine): the self-sustaining bistable
+    bump settles at a *different radius* in float32 vs float64 (e.g. sim 050: Cedar 177 cells vs dnfc
+    166), giving field-wide deviations up to **3.31** — but the bump is **present in both**, so
+    behaviour still agrees 100%.
+  - **Any FFTW memory pair** (`cedar_opencv_vs_cedar_fftw`, `cedar_fftw_vs_dnfc`): the 2D FFTW memory
+    bump **collapses entirely**, so the difference is the full bump amplitude (~41) and the bump is
+    *absent* in FFTW — these are the only pairs that also fail the behavioural check on memory.
 - This is **intrinsic to Cedar's precision/convolution path, not tunable and not a bug.** A
   parameter sweep (global inhibition −0.05→−0.18; inhibitory amplitude ×2.5→×4.0) only **relocates**
   which sim's equilibrium radius lands on a ring boundary — it never eliminates the divergence, and
@@ -86,8 +122,11 @@ self-sustaining memory bumps.
   not the reason the frameworks differ. See `../.claude/cedar-notes.md` for the decomposition table.
 - **Removing the cross-framework gap** would require running Cedar's core in CV_64F (CV_32F is
   hard-wired across ~131 Cedar source files), i.e. a non-standard double-precision build — float32 is
-  Cedar's actual design choice, so we report it rather than fork the library. Behaviour agrees
-  **100%** (every memory bump is present and centred identically in all frameworks).
+  Cedar's actual design choice, so we report it rather than fork the library. For the OpenCV engine vs
+  dnfc, behaviour agrees **100%** (the memory bump is present and centred identically; only its radius
+  differs). The Cedar **FFTW** engine is the exception in 2D: its self-sustaining memory bump collapses
+  (it does not survive the stimulus-off phase), so FFTW memory pairs disagree behaviourally — see the
+  "Cedar OpenCV vs FFTW equivalence (2D)" note above and `../.claude/cedar-notes.md`.
 
 See `fig_difference_2d.pdf` for the per-type Cedar−dnfc difference maps (after the +1,+1 offset
 correction) and `fig_fields_2d.pdf` for representative 2D fields.

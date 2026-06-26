@@ -10,10 +10,17 @@ _COSIVINA_PYTHON_ROOT = Path(__file__).resolve().parents[4] / "cosivina_python"
 if str(_COSIVINA_PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(_COSIVINA_PYTHON_ROOT))
 
-from cosivina.nonumba import (
-    Simulator, GaussStimulus2D, SumInputs,
-    NeuralField, GaussKernel2D, LateralInteractions2D,
+# Variant selected by the runner via the COSIVINA_VARIANT env var ("numba" |
+# "nonumba"); defaults to nonumba for standalone execution. The two variants share
+# this file — only the imported backend differs.
+_variant = os.environ.get("COSIVINA_VARIANT", "nonumba")
+_mod = __import__(
+    "cosivina.numba" if _variant == "numba" else "cosivina.nonumba",
+    fromlist=["Simulator", "GaussStimulus2D", "SumInputs",
+              "NeuralField", "GaussKernel2D", "LateralInteractions2D"],
 )
+Simulator, GaussStimulus2D, SumInputs = _mod.Simulator, _mod.GaussStimulus2D, _mod.SumInputs
+NeuralField, GaussKernel2D, LateralInteractions2D = _mod.NeuralField, _mod.GaussKernel2D, _mod.LateralInteractions2D
 
 FIELD_SIZE = (50, 50)
 TAU        = 25.0

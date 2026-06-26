@@ -11,11 +11,21 @@ Usage (from cross-platform-validation-2d/):
 """
 
 import importlib.util
+import os
+import sys
 from pathlib import Path
+
+# Variant ("numba" | "nonumba") chosen from argv; set BEFORE loading sim modules so
+# the shared sim_*.py import the matching cosivina backend (they read COSIVINA_VARIANT).
+VARIANT = sys.argv[1] if len(sys.argv) > 1 else "nonumba"
+if VARIANT not in ("numba", "nonumba"):
+    print(f"Unknown variant '{VARIANT}'; defaulting to nonumba")
+    VARIANT = "nonumba"
+os.environ["COSIVINA_VARIANT"] = VARIANT
 
 ROOT    = Path(__file__).resolve().parent.parent      # cross-platform-validation-2d/
 SIM_DIR = ROOT / "simulations" / "cosivina-python"
-OUT_DIR = ROOT / "data" / "cosivina-python"
+OUT_DIR = ROOT / "data" / f"cosivina-python-{VARIANT}"
 
 
 def load_sim(path: Path):
@@ -27,6 +37,7 @@ def load_sim(path: Path):
 
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"cosivina-python 2D variant: {VARIANT}  ->  {OUT_DIR}")
     scripts = sorted(SIM_DIR.glob("sim_*.py"))
     print(f"Found {len(scripts)} 2D simulation scripts.")
 
