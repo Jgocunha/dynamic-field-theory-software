@@ -159,7 +159,7 @@ static void run_benchmark(int N, const Arch& arch, const std::string& outfile)
 
         double elapsed = std::chrono::duration<double>(t1 - t0).count();
         double sps     = TIMED_STEPS / elapsed;
-        std::fprintf(fp,  "dnfc,%s,headless,%d,%d,%.2f\n", arch.name.c_str(), N, run + 1, sps);
+        std::fprintf(fp,  "dnfc,default,%s,headless,%d,%d,%.2f\n", arch.name.c_str(), N, run + 1, sps);
         std::printf("dnfc %-12s N=%4d run=%d  %.1f steps/s\n", arch.name.c_str(), N, run + 1, sps);
     }
     std::fclose(fp);
@@ -188,7 +188,7 @@ int main(int argc, char* argv[])
     std::string      outfile = (argc > 1) ? argv[1] : "timings-dnfc.csv";
     std::string      archName = (argc > 2) ? argv[2] : "detection";
     std::vector<int> Ns       = (argc > 3) ? parse_n_list(argv[3])
-                                           : std::vector<int>{10, 50, 100, 500, 1000};
+                                           : std::vector<int>{10, 50, 100};
     const Arch& arch = get_arch(archName);
     std::printf("dnfc headless benchmark [arch=%s] -> %s\n", arch.name.c_str(), outfile.c_str());
     for (int N : Ns)

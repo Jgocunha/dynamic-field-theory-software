@@ -161,7 +161,7 @@ static void run_benchmark(int N, const Arch& arch, const std::string& outfile, i
 
         double elapsed = std::chrono::duration<double>(t1 - t0).count();
         double sps     = timedSteps / elapsed;
-        std::fprintf(fp,  "dnfc,%s,headless,%d,%d,%.2f\n", arch.name.c_str(), N, run + 1, sps);
+        std::fprintf(fp,  "dnfc,default,%s,headless,%d,%d,%.2f\n", arch.name.c_str(), N, run + 1, sps);
         std::printf("dnfc 2D %-12s N=%4d run=%d  %.1f steps/s\n", arch.name.c_str(), N, run + 1, sps);
         std::fflush(stdout);
     }
@@ -187,7 +187,7 @@ int main(int argc, char* argv[])
     // Usage: benchmark_headless_2d [output_csv] [arch] [N_csv] [timed_steps] [n_runs]
     std::string      outfile  = (argc > 1) ? argv[1] : "timings-dnfc-2d.csv";
     std::string      archName = (argc > 2) ? argv[2] : "detection";
-    std::vector<int> Ns       = (argc > 3) ? parse_n_list(argv[3]) : std::vector<int>{10, 50, 100, 500, 1000};
+    std::vector<int> Ns       = (argc > 3) ? parse_n_list(argv[3]) : std::vector<int>{10, 50, 100};
     const int        timedSteps = (argc > 4) ? std::stoi(argv[4]) : TIMED_STEPS;
     const int        nRuns      = (argc > 5) ? std::stoi(argv[5]) : N_RUNS;
     const Arch& arch = get_arch(archName);

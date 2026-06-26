@@ -1,13 +1,15 @@
 # analysis.R — DFT Framework Benchmark Analysis
 #
 # Reads four per-framework CSV files and produces, per architecture:
-#   - steps/second for Cedar, Cosivina, dnfc, cosivina-python × N
+#   - steps/second for each framework VARIANT × N
 #   - 95% CI on the mean (t-interval over the >=10 runs/cell)
-#   - speedup ratios relative to Cosivina
-#   - scaling efficiency (detection sweep)
+#   - speedup ratios relative to Cosivina (MATLAB)
+#
+# Variants compared: cosivina (MATLAB), cosivina-python (numba | nonumba),
+# cedar (opencv | fftw), dnfc. The framework+variant pair is the display key `fwv`.
 #
 # CSV format (no header, comma-separated):
-#   framework, arch, mode, N, run, steps_per_second
+#   framework, variant, arch, mode, N, run, steps_per_second
 #
 # Run from the benchmarking/ root directory:
 #   Rscript analysis.R
@@ -29,13 +31,20 @@ if (is.null(ROOT) || ROOT == "") ROOT <- normalizePath(".")
 
 col_spec <- cols(
   framework        = col_character(),
+  variant          = col_character(),
   arch             = col_character(),
   mode             = col_character(),
   N                = col_integer(),
   run              = col_integer(),
   steps_per_second = col_double()
 )
-col_nms <- c("framework", "arch", "mode", "N", "run", "steps_per_second")
+col_nms <- c("framework", "variant", "arch", "mode", "N", "run", "steps_per_second")
+
+# framework+variant display label: bare framework when variant is "default",
+# else "framework (variant)" — e.g. "cedar (fftw)", "cosivina-python (nonumba)".
+make_fwv <- function(framework, variant) {
+  ifelse(variant == "default", framework, paste0(framework, " (", variant, ")"))
+}
 
 read_framework <- function(filename) {
   path <- file.path(ROOT, "data", filename)
@@ -54,11 +63,13 @@ cat(sprintf("Loaded %d rows total\n\n", nrow(timings)))
 
 ARCH_ORDER <- c("detection", "selection", "memory", "insufficient", "multi-peak")
 
+timings <- timings %>% mutate(fwv = make_fwv(framework, variant))
+
 # ---------------------------------------------------------------------------
-# Aggregate (per framework x arch x N)
+# Aggregate (per framework-variant x arch x N)
 # ---------------------------------------------------------------------------
 summary_df <- timings %>%
-  group_by(framework, arch, mode, N) %>%
+  group_by(framework, variant, fwv, arch, mode, N) %>%
   summarise(
     median_sps = median(steps_per_second),
     mean_sps   = mean(steps_per_second),
@@ -91,53 +102,32 @@ for (a in archs_present) {
 
   wide <- sub %>%
     mutate(label = sprintf("%.0f", round(median_sps))) %>%
-    select(framework, N, label) %>%
+    select(fwv, N, label) %>%
     pivot_wider(names_from = N, values_from = label, names_prefix = "N=") %>%
-    arrange(framework)
+    arrange(fwv)
   cat("--- median steps/second (>=10 runs) ---\n")
   print(as.data.frame(wide))
 
   detail <- sub %>%
     mutate(stats = sprintf("%.0f [%.0f-%.0f]", median_sps, min_sps, max_sps)) %>%
-    select(framework, N, stats) %>%
+    select(fwv, N, stats) %>%
     pivot_wider(names_from = N, values_from = stats, names_prefix = "N=") %>%
-    arrange(framework)
+    arrange(fwv)
   cat("--- median [min-max] ---\n")
   print(as.data.frame(detail))
 
-  pivot_median <- sub %>%
-    select(framework, N, median_sps) %>%
-    pivot_wider(names_from = framework, values_from = median_sps)
-
-  if ("cosivina" %in% names(pivot_median)) {
-    sp <- pivot_median %>%
-      mutate(
-        dnfc_vs_cosivina  = if ("dnfc"  %in% names(.)) round(dnfc  / cosivina, 2) else NA_real_,
-        cedar_vs_cosivina = if ("cedar" %in% names(.)) round(cedar / cosivina, 2) else NA_real_,
-        dnfc_vs_cedar     = if (all(c("dnfc","cedar") %in% names(.))) round(dnfc / cedar, 2) else NA_real_,
-        `cpy_vs_cosivina` = if ("cosivina-python" %in% names(.)) round(`cosivina-python` / cosivina, 2) else NA_real_
-      ) %>%
-      select(N, any_of(c("dnfc_vs_cosivina", "cedar_vs_cosivina", "dnfc_vs_cedar", "cpy_vs_cosivina")))
-    cat("--- speedup vs Cosivina ---\n")
+  # Speedup of every variant relative to Cosivina (MATLAB) at each N.
+  ref <- sub %>% filter(framework == "cosivina") %>% select(N, ref_sps = median_sps)
+  if (nrow(ref) > 0) {
+    sp <- sub %>%
+      inner_join(ref, by = "N") %>%
+      mutate(speedup = round(median_sps / ref_sps, 2)) %>%
+      select(fwv, N, speedup) %>%
+      pivot_wider(names_from = N, values_from = speedup, names_prefix = "N=") %>%
+      arrange(fwv)
+    cat("--- speedup vs Cosivina (MATLAB) ---\n")
     print(as.data.frame(sp))
   }
-  cat("\n")
-}
-
-# ---------------------------------------------------------------------------
-# Scaling efficiency (detection sweep; steps/s relative to N=10 baseline)
-# ---------------------------------------------------------------------------
-if ("detection" %in% archs_present) {
-  det <- summary_df %>% filter(mode == "headless", arch == "detection")
-  baseline <- det %>% filter(N == 10) %>% select(framework, base_sps = median_sps)
-  scaling <- det %>%
-    left_join(baseline, by = "framework") %>%
-    mutate(efficiency = round(median_sps / base_sps * (N / 10), 3)) %>%
-    select(framework, N, efficiency) %>%
-    pivot_wider(names_from = N, values_from = efficiency, names_prefix = "N=") %>%
-    arrange(framework)
-  cat("=== Scaling efficiency, detection sweep (1.0 = perfectly linear) ===\n")
-  print(as.data.frame(scaling))
   cat("\n")
 }
 

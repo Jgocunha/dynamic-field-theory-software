@@ -114,12 +114,15 @@ static std::string lateral_kernels_block(const Arch& arch)
     return k.str();
 }
 
-static std::string build_architecture_json(int n, const Arch& arch)
+static std::string build_architecture_json(int n, const Arch& arch, const std::string& variant)
 {
     const std::string lateral = lateral_kernels_block(arch);
     const std::string global_inh =
         (arch.kernel == KernelType::Gauss && arch.kGlobal != 0.0)
             ? std::to_string(arch.kGlobal) : "0";
+    // Convolution engine: OpenCV spatial filter2D (default) or FFTW Fourier-domain.
+    const std::string engine = (variant == "fftw") ? "cedar.aux.conv.FFTW"
+                                                    : "cedar.aux.conv.OpenCV";
 
     std::ostringstream steps, conns;
     bool first_step = true, first_conn = true;
@@ -155,7 +158,7 @@ static std::string build_architecture_json(int n, const Arch& arch)
           "            \"global inhibition\": \"" << global_inh << "\",\n"
           "            \"lateral kernels\": " << lateral << ",\n"
           "            \"lateral kernel convolution\": {\n"
-          "                \"engine\": {\"type\": \"cedar.aux.conv.OpenCV\"},\n"
+          "                \"engine\": {\"type\": \"" << engine << "\"},\n"
           "                \"borderType\": \"Cyclic\", \"mode\": \"Same\", \"alternate even kernel center\": \"false\"\n"
           "            },\n"
           "            \"comments\": \"\"\n"
@@ -185,12 +188,12 @@ static std::string build_architecture_json(int n, const Arch& arch)
 // Benchmark one N value
 // ---------------------------------------------------------------------------
 
-static void run_benchmark(int n, const Arch& arch, const std::string& outfile)
+static void run_benchmark(int n, const Arch& arch, const std::string& variant, const std::string& outfile)
 {
     // Write the architecture to a temp JSON and load it.
     const fs::path tmp = fs::temp_directory_path() /
-        ("cedar_bench_" + arch.name + "_N" + std::to_string(n) + ".json");
-    { std::ofstream f(tmp); f << build_architecture_json(n, arch); }
+        ("cedar_bench_" + arch.name + "_" + variant + "_N" + std::to_string(n) + ".json");
+    { std::ofstream f(tmp); f << build_architecture_json(n, arch, variant); }
 
     cedar::proc::GroupPtr group(new cedar::proc::Group());
     group->readJson(tmp.string());
@@ -224,8 +227,8 @@ static void run_benchmark(int n, const Arch& arch, const std::string& outfile)
 
         const double elapsed = std::chrono::duration<double>(t1 - t0).count();
         const double sps     = TIMED_STEPS / elapsed;
-        std::fprintf(fp,  "cedar,%s,headless,%d,%d,%.2f\n", arch.name.c_str(), n, run, sps);
-        std::printf("cedar %-12s N=%4d run=%d  %.1f steps/s\n", arch.name.c_str(), n, run, sps);
+        std::fprintf(fp,  "cedar,%s,%s,headless,%d,%d,%.2f\n", variant.c_str(), arch.name.c_str(), n, run, sps);
+        std::printf("cedar/%-6s %-12s N=%4d run=%d  %.1f steps/s\n", variant.c_str(), arch.name.c_str(), n, run, sps);
     }
     std::fclose(fp);
     std::error_code ec; fs::remove(tmp, ec);
@@ -237,14 +240,16 @@ int main(int argc, char* argv[])
     cv::setNumThreads(0);   // force single-threaded OpenCV convolution (fair single-thread timing)
     cedar::aux::GlobalClockSingleton::getInstance()->start();
 
-    // Usage: benchmark [output_csv] [arch] [N_csv]
+    // Usage: benchmark [output_csv] [arch] [variant] [N_csv]
+    //   variant: opencv (default) | fftw  — selects the convolution engine
     const std::string outfile  = (argc > 1) ? argv[1] : "timings-cedar.csv";
     const std::string archName = (argc > 2) ? argv[2] : "detection";
+    const std::string variant  = (argc > 3) ? argv[3] : "opencv";
     const Arch& arch = get_arch(archName);
 
     std::vector<int> Ns;
-    if (argc > 3) {
-        std::string s = argv[3];
+    if (argc > 4) {
+        std::string s = argv[4];
         size_t pos = 0;
         while (pos < s.size()) {
             size_t comma = s.find(',', pos);
@@ -254,12 +259,12 @@ int main(int argc, char* argv[])
             pos = comma + 1;
         }
     } else {
-        Ns = {10, 50, 100, 500, 1000};
+        Ns = {10, 50, 100};
     }
 
-    std::printf("Cedar headless benchmark [arch=%s] (real API, cv threads=0) -> %s\n",
-                arch.name.c_str(), outfile.c_str());
+    std::printf("Cedar headless benchmark [arch=%s variant=%s] (real API, cv threads=0) -> %s\n",
+                arch.name.c_str(), variant.c_str(), outfile.c_str());
     for (int n : Ns)
-        run_benchmark(n, arch, outfile);
+        run_benchmark(n, arch, variant, outfile);
     return 0;
 }

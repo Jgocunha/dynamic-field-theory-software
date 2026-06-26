@@ -24,9 +24,10 @@ if (is.null(ROOT) || ROOT == "") ROOT <- normalizePath(".")
 
 # -- Data ----------------------------------------------------------------------
 
-col_nms  <- c("framework", "arch", "mode", "N", "run", "steps_per_second")
+col_nms  <- c("framework", "variant", "arch", "mode", "N", "run", "steps_per_second")
 col_spec <- cols(
   framework        = col_character(),
+  variant          = col_character(),
   arch             = col_character(),
   mode             = col_character(),
   N                = col_integer(),
@@ -35,6 +36,10 @@ col_spec <- cols(
 )
 
 ARCH_ORDER <- c("detection", "selection", "memory", "insufficient", "multi-peak")
+
+make_fwv <- function(framework, variant) {
+  ifelse(variant == "default", framework, paste0(framework, " (", variant, ")"))
+}
 
 read_fw <- function(f) {
   path <- file.path(ROOT, "data", f)
@@ -47,11 +52,11 @@ timings <- bind_rows(
   read_fw("timings-cosivina-2d.csv"),
   read_fw("timings-dnfc-2d.csv"),
   read_fw("timings-cosivina-python-2d.csv")
-)
+) %>% mutate(fwv = make_fwv(framework, variant))
 
 summary_df <- timings %>%
   filter(mode == "headless") %>%
-  group_by(framework, arch, N) %>%
+  group_by(fwv, arch, N) %>%
   summarise(
     median_sps = median(steps_per_second),
     mean_sps   = mean(steps_per_second),
@@ -65,49 +70,58 @@ summary_df <- timings %>%
 
 # -- Cosmetics -----------------------------------------------------------------
 
-fw_order  <- c("dnfc", "cedar", "cosivina", "cosivina-python")
+# Six framework-variant series (matches ../benchmarking/fig_benchmark.R).
+fw_order  <- c("dnfc", "cedar", "cedar (fftw)", "cosivina",
+               "cosivina-python", "cosivina-python (nonumba)")
 
 fw_labels <- c(
-  "dnfc"            = "dnfc (C++, float64)",
-  "cedar"           = "Cedar (C++, float32)",
-  "cosivina"        = "Cosivina (MATLAB, float64)",
-  "cosivina-python" = "cosivina-python (Python, float64)"
+  "dnfc"                       = "dnfc (C++, float64)",
+  "cedar"                      = "Cedar (C++, float32, OpenCV)",
+  "cedar (fftw)"               = "Cedar (C++, float32, FFTW)",
+  "cosivina"                   = "Cosivina (MATLAB, float64)",
+  "cosivina-python"            = "cosivina-python (numba)",
+  "cosivina-python (nonumba)"  = "cosivina-python (pure NumPy)"
 )
 
-# Colorblind-friendly palette (Wong 2011)
 fw_colors <- c(
-  "dnfc"            = "#0072B2",   # blue
-  "cedar"           = "#D55E00",   # vermillion
-  "cosivina"        = "#009E73",   # green
-  "cosivina-python" = "#CC79A7"    # pink
+  "dnfc"                       = "#0072B2",
+  "cedar"                      = "#D55E00",
+  "cedar (fftw)"               = "#E69F00",
+  "cosivina"                   = "#009E73",
+  "cosivina-python"            = "#CC79A7",
+  "cosivina-python (nonumba)"  = "#7B3294"
 )
 
 fw_shapes <- c(
-  "dnfc"            = 16,  # circle
-  "cedar"           = 17,  # triangle
-  "cosivina"        = 15,  # square
-  "cosivina-python" = 18   # diamond
+  "dnfc"                       = 16,
+  "cedar"                      = 17,
+  "cedar (fftw)"               = 2,
+  "cosivina"                   = 15,
+  "cosivina-python"            = 18,
+  "cosivina-python (nonumba)"  = 5
 )
 
 fw_lty <- c(
-  "dnfc"            = "solid",
-  "cedar"           = "solid",
-  "cosivina"        = "dashed",
-  "cosivina-python" = "dotted"
+  "dnfc"                       = "solid",
+  "cedar"                      = "solid",
+  "cedar (fftw)"               = "dashed",
+  "cosivina"                   = "dashed",
+  "cosivina-python"            = "dotted",
+  "cosivina-python (nonumba)"  = "dotdash"
 )
 
 summary_df <- summary_df %>%
-  mutate(framework = factor(framework, levels = fw_order))
+  mutate(fwv = factor(fwv, levels = intersect(fw_order, unique(fwv))))
 
 # -- Figure 1: throughput vs N, faceted by architecture (2D) -------------------
 
 p_throughput <- ggplot(
   summary_df,
-  aes(x = N, y = median_sps, colour = framework,
-      shape = framework, linetype = framework, group = framework)
+  aes(x = N, y = median_sps, colour = fwv,
+      shape = fwv, linetype = fwv, group = fwv)
 ) +
   geom_ribbon(
-    aes(ymin = ci95_lo, ymax = ci95_hi, fill = framework),
+    aes(ymin = ci95_lo, ymax = ci95_hi, fill = fwv),
     alpha = 0.15, colour = NA
   ) +
   geom_line(linewidth = 0.9) +
@@ -139,14 +153,14 @@ p_throughput <- ggplot(
     plot.subtitle        = element_text(size = 9, colour = "grey40"),
     strip.text           = element_text(face = "bold")
   ) +
-  guides(colour   = guide_legend(nrow = 2),
-         shape    = guide_legend(nrow = 2),
-         linetype = guide_legend(nrow = 2))
+  guides(colour   = guide_legend(nrow = 3),
+         shape    = guide_legend(nrow = 3),
+         linetype = guide_legend(nrow = 3))
 
 ggsave(
   file.path(ROOT, "fig_benchmark_throughput.png"),
   p_throughput,
-  width = 9, height = 6.5, dpi = 150
+  width = 9, height = 7, dpi = 150
 )
 cat("Saved: fig_benchmark_throughput.png\n")
 
@@ -154,26 +168,27 @@ cat("Saved: fig_benchmark_throughput.png\n")
 
 ref_N <- 100
 cosivina_ref <- summary_df %>%
-  filter(framework == "cosivina", N == ref_N) %>%
+  filter(fwv == "cosivina", N == ref_N) %>%
   select(arch, ref_sps = median_sps)
 
+speedup_order <- setdiff(fw_order, "cosivina")
 speedup_df <- summary_df %>%
-  filter(framework != "cosivina", N == ref_N) %>%
+  filter(fwv != "cosivina", N == ref_N) %>%
   inner_join(cosivina_ref, by = "arch") %>%
   mutate(
     speedup    = median_sps / ref_sps,
     speedup_lo = ci95_lo / ref_sps,
     speedup_hi = ci95_hi / ref_sps,
-    framework  = factor(framework, levels = c("dnfc", "cedar", "cosivina-python"))
+    fwv        = factor(fwv, levels = intersect(speedup_order, unique(fwv)))
   )
 
-speedup_colors <- fw_colors[c("dnfc", "cedar", "cosivina-python")]
-speedup_labels <- fw_labels[c("dnfc", "cedar", "cosivina-python")]
+speedup_colors <- fw_colors[intersect(speedup_order, names(fw_colors))]
+speedup_labels <- fw_labels[intersect(speedup_order, names(fw_labels))]
 
 if (nrow(speedup_df) > 0) {
   p_speedup <- ggplot(
     speedup_df,
-    aes(x = arch, y = speedup, fill = framework)
+    aes(x = arch, y = speedup, fill = fwv)
   ) +
     geom_col(position = position_dodge(width = 0.78), width = 0.7) +
     geom_errorbar(

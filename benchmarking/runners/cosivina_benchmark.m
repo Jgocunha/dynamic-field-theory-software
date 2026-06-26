@@ -27,12 +27,10 @@ WARMUP_STEPS = 200;
 TIMED_STEPS  = 5000;
 N_RUNS       = 10;
 
-% Architecture realism matrix: all 5 archs at reduced N.
+% Architecture matrix: all 5 archs across N (answers both "vs architecture" and
+% "vs number of fields"; no separate scaling sweep).
 ARCH_LIST    = {'detection', 'selection', 'memory', 'insufficient', 'multi-peak'};
 ARCH_N       = [10, 50, 100];
-% Scaling sweep: detection across the full N range (comparable to prior tables).
-SCALING_ARCH = 'detection';
-SCALING_N    = [10, 50, 100, 500, 1000];
 
 if ~exist(DATA_DIR, 'dir')
     mkdir(DATA_DIR);
@@ -43,15 +41,8 @@ if fid == -1
     error('Cannot open %s for writing', OUTPUT_FILE);
 end
 
-% --- Architecture realism matrix (5 archs x reduced N) ---
 for ai = 1:length(ARCH_LIST)
     run_arch(fid, ARCH_LIST{ai}, ARCH_N, WARMUP_STEPS, TIMED_STEPS, N_RUNS);
-end
-
-% --- Detection scaling sweep (full N), the extra (500/1000) cells only ---
-extra_N = setdiff(SCALING_N, ARCH_N);
-if ~isempty(extra_N)
-    run_arch(fid, SCALING_ARCH, extra_N, WARMUP_STEPS, TIMED_STEPS, N_RUNS);
 end
 
 fclose(fid);
@@ -77,7 +68,7 @@ function run_arch(fid, archName, N_VALUES, WARMUP_STEPS, TIMED_STEPS, N_RUNS)
             for t = 1:TIMED_STEPS; sim.step(); end
             elapsed = toc(t0);
             sps = TIMED_STEPS / elapsed;
-            fprintf(fid, 'cosivina,%s,headless,%d,%d,%.2f\n', archName, N, r, sps);
+            fprintf(fid, 'cosivina,default,%s,headless,%d,%d,%.2f\n', archName, N, r, sps);
             fprintf('  headless  run=%d  %.1f steps/s\n', r, sps);
         end
     end

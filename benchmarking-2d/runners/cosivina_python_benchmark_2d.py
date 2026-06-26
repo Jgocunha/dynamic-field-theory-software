@@ -34,22 +34,26 @@ _COSIVINA_ROOT = Path(__file__).resolve().parents[3] / "cosivina_python"
 if str(_COSIVINA_ROOT) not in sys.path:
     sys.path.insert(0, str(_COSIVINA_ROOT))
 
-try:
-    from cosivina.numba import (
-        Simulator, GaussStimulus2D, NormalNoise,
-        SumInputs, NeuralField, GaussKernel2D, LateralInteractions2D,
-    )
-except ImportError:
-    from cosivina.nonumba import (
-        Simulator, GaussStimulus2D, NormalNoise,
-        SumInputs, NeuralField, GaussKernel2D, LateralInteractions2D,
-    )
+
+def load_cosivina(variant: str):
+    """Import the cosivina 2D element classes from the chosen variant module
+    (`numba` JIT path or `nonumba` pure-Python/NumPy path) and bind them as
+    module globals. Explicit selection, not a silent fallback."""
+    module = "cosivina.numba" if variant == "numba" else "cosivina.nonumba"
+    mod = __import__(module, fromlist=[
+        "Simulator", "GaussStimulus2D", "NormalNoise",
+        "SumInputs", "NeuralField", "GaussKernel2D", "LateralInteractions2D",
+    ])
+    for name in ("Simulator", "GaussStimulus2D", "NormalNoise",
+                 "SumInputs", "NeuralField", "GaussKernel2D", "LateralInteractions2D"):
+        globals()[name] = getattr(mod, name)
+
 
 FIELD_SIZE   = (50, 50)
 WARMUP_STEPS = 200
 TIMED_STEPS  = 5000
 N_RUNS       = 10
-N_VALUES     = [10, 50, 100, 500, 1000]
+N_VALUES     = [10, 50, 100]
 
 # Architecture definitions (2D) — representative validation sim of each band with
 # the 2D amplitude adjustments from generate_simulations_2d.py (positions halved;
@@ -120,31 +124,39 @@ def create_sim(n: int, arch: dict):
 
 
 def main():
-    # Usage: cosivina_python_benchmark_2d.py [arch] [N_csv]
+    # Usage: cosivina_python_benchmark_2d.py [arch] [variant] [N_csv]
+    #   variant  numba|nonumba  (default numba)
     arch_name = sys.argv[1] if len(sys.argv) > 1 else "detection"
     if arch_name not in ARCHS:
         print(f"Unknown arch '{arch_name}'; defaulting to detection")
         arch_name = "detection"
     arch = ARCHS[arch_name]
-    n_values = ([int(x) for x in sys.argv[2].split(",") if x]
-                if len(sys.argv) > 2 else N_VALUES)
+    variant = sys.argv[2] if len(sys.argv) > 2 else "numba"
+    if variant not in ("numba", "nonumba"):
+        print(f"Unknown variant '{variant}'; defaulting to numba")
+        variant = "numba"
+    n_values = ([int(x) for x in sys.argv[3].split(",") if x]
+                if len(sys.argv) > 3 else N_VALUES)
+
+    load_cosivina(variant)
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     # Report the pinned thread environment for reproducibility.
     print("Thread pinning:", {v: os.environ.get(v) for v in
           ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS")})
-    try:
-        import numba
-        print(f"numba {numba.__version__}, NUMBA_NUM_THREADS effective = {numba.get_num_threads()}")
-    except Exception:
-        pass
+    if variant == "numba":
+        try:
+            import numba
+            print(f"numba {numba.__version__}, NUMBA_NUM_THREADS effective = {numba.get_num_threads()}")
+        except Exception:
+            pass
 
-    print(f"cosivina-python 2D headless benchmark [arch={arch_name}] -> {OUTPUT}")
+    print(f"cosivina-python 2D headless benchmark [arch={arch_name} variant={variant}] -> {OUTPUT}")
 
     with open(OUTPUT, "a") as fid:
         for n in n_values:
-            print(f"=== cosivina-python 2D  {arch_name}  N={n} ===")
+            print(f"=== cosivina-python/{variant} 2D  {arch_name}  N={n} ===")
 
             sim = create_sim(n, arch)
             sim.init()
@@ -158,7 +170,7 @@ def main():
                     sim.step()
                 elapsed = time.perf_counter() - t0
                 sps = TIMED_STEPS / elapsed
-                fid.write(f"cosivina-python,{arch_name},headless,{n},{r},{sps:.2f}\n")
+                fid.write(f"cosivina-python,{variant},{arch_name},headless,{n},{r},{sps:.2f}\n")
                 fid.flush()
                 print(f"  headless  run={r}  {sps:.1f} steps/s")
 
