@@ -23,19 +23,20 @@
 using namespace dnf_composer;
 using namespace dnf_composer::element;
 
-static constexpr int    FIELD_SIZE   = 100;
+static constexpr int    BASE_SIZE    = 100;   // reference grid the arch positions are defined on
 static constexpr double TAU          = 25.0;
+static constexpr double NOISE_AMP    = 0.1;    // benchmark uses A>0 so the RNG cost is measured
 static constexpr int    WARMUP_STEPS = 200;
 static constexpr int    TIMED_STEPS  = 5000;
 static constexpr int    N_RUNS       = 10;
 
 // ── Architecture definitions ────────────────────────────────────────────────
-// The five benchmark architectures reuse the representative sim of each band in
+// The four benchmark architectures reuse the representative sim of each band in
 // the cross-platform-validation suite (detection 001, selection 021, memory 041,
-// insufficient 061, multi-peak 081). Same params, only the field is replicated N
-// times. This lets the benchmark exercise the kernel/coupling regimes real DFT
-// models use (Gaussian, Mexican-hat, global inhibition, multi-stimulus) rather
-// than a single trivial path.
+// multi-peak 081). Same params, only the field is replicated N times. This lets
+// the benchmark exercise the kernel/coupling regimes real DFT models use
+// (Gaussian, Mexican-hat, global inhibition, multi-stimulus) rather than a single
+// trivial path.
 
 enum class KernelType { Gauss, MexicanHat };
 
@@ -69,9 +70,6 @@ static const Arch& get_arch(const std::string& name)
         // memory 041 (Mexican-hat, self-sustaining)
         {"memory",       -5.0,  KernelType::MexicanHat, 0,0,0,           3.4,17.7,8.9,13.5,
             {{15.0, 5.0, 50.0}}},
-        // insufficient 061 (subthreshold)
-        {"insufficient",-12.0,  KernelType::Gauss,      3.0, 3.0, 0.0,   0,0,0,0,
-            {{5.0, 5.0, 50.0}}},
         // multi-peak 081 (2 narrow stimuli, narrow kernel)
         {"multi-peak",   -8.0,  KernelType::Gauss,      2.0, 5.0, 0.0,   0,0,0,0,
             {{12.0, 5.0, 25.0}, {12.0, 5.0, 75.0}}},
@@ -82,8 +80,9 @@ static const Arch& get_arch(const std::string& name)
     return archs[0];
 }
 
-static std::shared_ptr<Simulation> build_simulation(int N, const Arch& arch)
+static std::shared_ptr<Simulation> build_simulation(int N, const Arch& arch, int field_size)
 {
+    const double pos_scale = static_cast<double>(field_size) / BASE_SIZE;
     auto sim = std::make_shared<Simulation>("bench", 25.0, 0.0, 0.0);
 
     for (int i = 0; i < N; ++i) {
@@ -92,7 +91,7 @@ static std::shared_ptr<Simulation> build_simulation(int N, const Arch& arch)
         // Neural field (logistic sigmoid, steepness=100)
         auto field = std::make_shared<NeuralField>(
             ElementCommonParameters{"field_" + si,
-                ElementDimensions{FIELD_SIZE}},
+                ElementDimensions{field_size, 1.0}},
             NeuralFieldParameters{TAU, arch.h, SigmoidFunction{0.0, 100.0}});
         sim->addElement(field);
 
@@ -101,18 +100,18 @@ static std::shared_ptr<Simulation> build_simulation(int N, const Arch& arch)
             const Stim& st = arch.stimuli[s];
             auto stim = std::make_shared<GaussStimulus>(
                 ElementCommonParameters{"stimulus_" + si + "_" + std::to_string(s),
-                    ElementDimensions{FIELD_SIZE}},
-                GaussStimulusParameters{st.sigma, st.amp, st.pos, true, false});
+                    ElementDimensions{field_size, 1.0}},
+                GaussStimulusParameters{st.sigma, st.amp, st.pos * pos_scale, true, false});
             sim->addElement(stim);
             field->addInput(stim);
         }
 
-        // Lateral kernel: Gauss (detection/selection/insufficient/multi-peak) or
+        // Lateral kernel: Gauss (detection/selection/multi-peak) or
         // Mexican-hat (memory).
         if (arch.kernel == KernelType::Gauss) {
             auto kernel = std::make_shared<GaussKernel>(
                 ElementCommonParameters{"kernel_" + si,
-                    ElementDimensions{FIELD_SIZE}},
+                    ElementDimensions{field_size, 1.0}},
                 GaussKernelParameters{arch.kWidth, arch.kAmp, arch.kGlobal, true, true});
             sim->addElement(kernel);
             kernel->addInput(field);
@@ -120,7 +119,7 @@ static std::shared_ptr<Simulation> build_simulation(int N, const Arch& arch)
         } else {
             auto kernel = std::make_shared<MexicanHatKernel>(
                 ElementCommonParameters{"kernel_" + si,
-                    ElementDimensions{FIELD_SIZE}},
+                    ElementDimensions{field_size, 1.0}},
                 MexicanHatKernelParameters{arch.kWidthExc, arch.kAmpExc,
                                            arch.kWidthInh, arch.kAmpInh, 0.0, true, true});
             sim->addElement(kernel);
@@ -128,20 +127,20 @@ static std::shared_ptr<Simulation> build_simulation(int N, const Arch& arch)
             field->addInput(kernel);
         }
 
-        // Normal noise (amplitude=0 — present to match element count)
+        // Normal noise (A>0 so the per-step RNG cost is part of the workload)
         auto noise = std::make_shared<NormalNoise>(
             ElementCommonParameters{"noise_" + si,
-                ElementDimensions{FIELD_SIZE}},
-            NormalNoiseParameters{0.0});
+                ElementDimensions{field_size, 1.0}},
+            NormalNoiseParameters{NOISE_AMP});
         sim->addElement(noise);
         field->addInput(noise);
     }
     return sim;
 }
 
-static void run_benchmark(int N, const Arch& arch, const std::string& outfile)
+static void run_benchmark(int N, const Arch& arch, int field_size, const std::string& outfile)
 {
-    auto sim = build_simulation(N, arch);
+    auto sim = build_simulation(N, arch, field_size);
     sim->init();
 
     // Warm-up
@@ -159,8 +158,10 @@ static void run_benchmark(int N, const Arch& arch, const std::string& outfile)
 
         double elapsed = std::chrono::duration<double>(t1 - t0).count();
         double sps     = TIMED_STEPS / elapsed;
-        std::fprintf(fp,  "dnfc,default,%s,headless,%d,%d,%.2f\n", arch.name.c_str(), N, run + 1, sps);
-        std::printf("dnfc %-12s N=%4d run=%d  %.1f steps/s\n", arch.name.c_str(), N, run + 1, sps);
+        std::fprintf(fp,  "dnfc,default,%s,%d,headless,%d,%d,%.2f\n",
+                     arch.name.c_str(), field_size, N, run + 1, sps);
+        std::printf("dnfc %-12s fs=%4d N=%4d run=%d  %.1f steps/s\n",
+                    arch.name.c_str(), field_size, N, run + 1, sps);
     }
     std::fclose(fp);
 }
@@ -181,17 +182,20 @@ static std::vector<int> parse_n_list(const std::string& s)
 
 int main(int argc, char* argv[])
 {
-    // Usage: benchmark_headless [output_csv] [arch] [N_csv]
+    // Usage: benchmark_headless [output_csv] [arch] [N_csv] [field_size]
     //   output_csv  default "timings-dnfc.csv"
-    //   arch        detection|selection|memory|insufficient|multi-peak (default detection)
-    //   N_csv       comma-separated field counts (default "10,50,100,500,1000")
+    //   arch        detection|selection|memory|multi-peak (default detection)
+    //   N_csv       comma-separated field counts (default "5,10,50,100")
+    //   field_size  field length (default 100)
     std::string      outfile = (argc > 1) ? argv[1] : "timings-dnfc.csv";
     std::string      archName = (argc > 2) ? argv[2] : "detection";
     std::vector<int> Ns       = (argc > 3) ? parse_n_list(argv[3])
-                                           : std::vector<int>{10, 50, 100};
+                                           : std::vector<int>{5, 10, 50, 100};
+    const int        field_size = (argc > 4) ? std::stoi(argv[4]) : BASE_SIZE;
     const Arch& arch = get_arch(archName);
-    std::printf("dnfc headless benchmark [arch=%s] -> %s\n", arch.name.c_str(), outfile.c_str());
+    std::printf("dnfc headless benchmark [arch=%s fs=%d] -> %s\n",
+                arch.name.c_str(), field_size, outfile.c_str());
     for (int N : Ns)
-        run_benchmark(N, arch, outfile);
+        run_benchmark(N, arch, field_size, outfile);
     return 0;
 }

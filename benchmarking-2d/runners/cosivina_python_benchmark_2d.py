@@ -49,15 +49,17 @@ def load_cosivina(variant: str):
         globals()[name] = getattr(mod, name)
 
 
-FIELD_SIZE   = (50, 50)
+BASE_GRID    = 50      # reference grid side the arch positions are defined on
+NOISE_AMP    = 0.1     # benchmark uses A>0 so the RNG cost is measured
 WARMUP_STEPS = 200
 TIMED_STEPS  = 5000
 N_RUNS       = 10
-N_VALUES     = [10, 50, 100]
+N_VALUES     = [5, 10, 50, 100]
 
-# Architecture definitions (2D) — representative validation sim of each band with
-# the 2D amplitude adjustments from generate_simulations_2d.py (positions halved;
-# selection kernel amp x4; memory exc/inh x2.5 + global -0.05).
+# Architecture definitions (2D) — representative validation sim of each band
+# (detection, selection, memory, multi-peak) with the 2D amplitude adjustments
+# from generate_simulations_2d.py (positions on the 50-grid; selection kernel
+# amp x4; memory exc/inh x2.5 + global -0.05).
 #   stimuli: list of (amplitude, sigma, position)
 #   kernel : ("gauss", sigma, amp, amp_global)
 #         or ("mexican_hat", sigmaExc, ampExc, sigmaInh, ampInh, amp_global)
@@ -68,44 +70,44 @@ ARCHS = {
                          kernel=("gauss", 3, 20.0, -0.15)),
     "memory":       dict(h=-5.0,  stimuli=[(15.0, 5, 25)],
                          kernel=("mexican_hat", 3.4, 44.25, 8.9, 33.75, -0.05)),
-    "insufficient": dict(h=-12.0, stimuli=[(5.0, 5, 25)],
-                         kernel=("gauss", 3, 3.0, 0.0)),
     "multi-peak":   dict(h=-8.0,  stimuli=[(12.0, 5, 12.5), (12.0, 5, 37.5)],
                          kernel=("gauss", 2, 5.0, 0.0)),
 }
 
 
-def create_sim(n: int, arch: dict):
-    """Build a Simulator with `n` independent 50x50 fields of the given architecture."""
+def create_sim(n: int, arch: dict, grid: int):
+    """Build a Simulator with `n` independent grid×grid fields of the given architecture."""
+    fs = (grid, grid)
+    pos_scale = grid / BASE_GRID
     sim = Simulator(deltaT=25.)
     for i in range(1, n + 1):
         name_s_list = []
         for s, (amp, sigma, pos) in enumerate(arch["stimuli"]):
             name_s = f"stimulus_{i}_{s}"
             name_s_list.append(name_s)
-            sim.addElement(GaussStimulus2D(name_s, FIELD_SIZE,
+            sim.addElement(GaussStimulus2D(name_s, fs,
                                            sigmaY=sigma, sigmaX=sigma, amplitude=amp,
-                                           positionY=pos, positionX=pos,
+                                           positionY=pos * pos_scale, positionX=pos * pos_scale,
                                            circularY=True, circularX=True, normalized=False))
         name_n   = f"noise_{i}"
         name_sum = f"sum_{i}"
         name_f   = f"field_{i}"
         name_k   = f"kernel_{i}"
 
-        sim.addElement(NormalNoise(name_n, FIELD_SIZE, amplitude=0.))
-        sim.addElement(SumInputs(name_sum, FIELD_SIZE), name_s_list + [name_n])
-        sim.addElement(NeuralField(name_f, FIELD_SIZE, tau=25, h=arch["h"], beta=100),
+        sim.addElement(NormalNoise(name_n, fs, amplitude=NOISE_AMP))
+        sim.addElement(SumInputs(name_sum, fs), name_s_list + [name_n])
+        sim.addElement(NeuralField(name_f, fs, tau=25, h=arch["h"], beta=100),
                        inputLabels=name_sum)
 
         k = arch["kernel"]
         if k[0] == "gauss" and k[3] == 0.0:
-            sim.addElement(GaussKernel2D(name_k, FIELD_SIZE,
+            sim.addElement(GaussKernel2D(name_k, fs,
                                          sigmaY=k[1], sigmaX=k[1], amplitude=k[2],
                                          circularY=True, circularX=True, normalized=True),
                            inputLabels=name_f, inputComponents="output",
                            targetLabels=name_f)
         elif k[0] == "gauss":
-            sim.addElement(LateralInteractions2D(name_k, FIELD_SIZE,
+            sim.addElement(LateralInteractions2D(name_k, fs,
                                                  sigmaExcY=k[1], sigmaExcX=k[1], amplitudeExc=k[2],
                                                  sigmaInhY=0.0, sigmaInhX=0.0, amplitudeInh=0.0,
                                                  amplitudeGlobal=k[3],
@@ -113,7 +115,7 @@ def create_sim(n: int, arch: dict):
                            inputLabels=name_f, inputComponents="output",
                            targetLabels=name_f)
         else:  # mexican_hat: (type, sigmaExc, ampExc, sigmaInh, ampInh, amp_global)
-            sim.addElement(LateralInteractions2D(name_k, FIELD_SIZE,
+            sim.addElement(LateralInteractions2D(name_k, fs,
                                                  sigmaExcY=k[1], sigmaExcX=k[1], amplitudeExc=k[2],
                                                  sigmaInhY=k[3], sigmaInhX=k[3], amplitudeInh=k[4],
                                                  amplitudeGlobal=k[5],
@@ -124,8 +126,11 @@ def create_sim(n: int, arch: dict):
 
 
 def main():
-    # Usage: cosivina_python_benchmark_2d.py [arch] [variant] [N_csv]
-    #   variant  numba|nonumba  (default numba)
+    # Usage: cosivina_python_benchmark_2d.py [arch] [variant] [N_csv] [grid_side]
+    #   arch        detection|selection|memory|multi-peak (default detection)
+    #   variant     numba|nonumba  (default numba)
+    #   N_csv       comma-separated field counts (default 5,10,50,100)
+    #   grid_side   field side length, NxN grid (default 50)
     arch_name = sys.argv[1] if len(sys.argv) > 1 else "detection"
     if arch_name not in ARCHS:
         print(f"Unknown arch '{arch_name}'; defaulting to detection")
@@ -137,6 +142,7 @@ def main():
         variant = "numba"
     n_values = ([int(x) for x in sys.argv[3].split(",") if x]
                 if len(sys.argv) > 3 else N_VALUES)
+    grid = int(sys.argv[4]) if len(sys.argv) > 4 else BASE_GRID
 
     load_cosivina(variant)
 
@@ -152,13 +158,13 @@ def main():
         except Exception:
             pass
 
-    print(f"cosivina-python 2D headless benchmark [arch={arch_name} variant={variant}] -> {OUTPUT}")
+    print(f"cosivina-python 2D headless benchmark [arch={arch_name} variant={variant} grid={grid}x{grid}] -> {OUTPUT}")
 
     with open(OUTPUT, "a") as fid:
         for n in n_values:
-            print(f"=== cosivina-python/{variant} 2D  {arch_name}  N={n} ===")
+            print(f"=== cosivina-python/{variant} 2D  {arch_name}  grid={grid}x{grid}  N={n} ===")
 
-            sim = create_sim(n, arch)
+            sim = create_sim(n, arch, grid)
             sim.init()
             for _ in range(WARMUP_STEPS):
                 sim.step()
@@ -170,7 +176,7 @@ def main():
                     sim.step()
                 elapsed = time.perf_counter() - t0
                 sps = TIMED_STEPS / elapsed
-                fid.write(f"cosivina-python,{variant},{arch_name},headless,{n},{r},{sps:.2f}\n")
+                fid.write(f"cosivina-python,{variant},{arch_name},{grid},headless,{n},{r},{sps:.2f}\n")
                 fid.flush()
                 print(f"  headless  run={r}  {sps:.1f} steps/s")
 

@@ -50,17 +50,18 @@ def load_cosivina(variant: str):
         globals()[name] = getattr(mod, name)
 
 
-FIELD_SIZE   = (1, 100)
+BASE_SIZE    = 100     # reference grid the arch positions are defined on
+NOISE_AMP    = 0.1     # benchmark uses A>0 so the RNG cost is measured
 WARMUP_STEPS = 200
 TIMED_STEPS  = 5000
 N_RUNS       = 10
-N_VALUES     = [10, 50, 100]
+N_VALUES     = [5, 10, 50, 100]
 
 # Architecture definitions — reuse the representative validation sim of each band
-# (detection 001, selection 021, memory 041, insufficient 061, multi-peak 081).
-# Matches the dnfc/Cedar benchmark Arch set and the validation generator's
-# cosivina-python pattern (GaussKernel1D for plain Gauss; LateralInteractions1D
-# for global inhibition and Mexican-hat).
+# (detection 001, selection 021, memory 041, multi-peak 081). Matches the
+# dnfc/Cedar benchmark Arch set and the validation generator's cosivina-python
+# pattern (GaussKernel1D for plain Gauss; LateralInteractions1D for global
+# inhibition and Mexican-hat).
 #   stimuli: list of (amplitude, sigma, position)
 #   kernel : ("gauss", sigma, amp, amp_global)
 #         or ("mexican_hat", sigmaExc, ampExc, sigmaInh, ampInh)
@@ -71,43 +72,43 @@ ARCHS = {
                          kernel=("gauss", 3, 5.0, -0.15)),
     "memory":       dict(h=-5.0,  stimuli=[(15.0, 5, 50)],
                          kernel=("mexican_hat", 3.4, 17.7, 8.9, 13.5)),
-    "insufficient": dict(h=-12.0, stimuli=[(5.0, 5, 50)],
-                         kernel=("gauss", 3, 3.0, 0.0)),
     "multi-peak":   dict(h=-8.0,  stimuli=[(12.0, 5, 25), (12.0, 5, 75)],
                          kernel=("gauss", 2, 5.0, 0.0)),
 }
 
 
-def create_sim(n: int, arch: dict):
+def create_sim(n: int, arch: dict, field_size: int):
     """Build a Simulator with `n` independent fields of the given architecture."""
+    fs = (1, field_size)
+    pos_scale = field_size / BASE_SIZE
     sim = Simulator(deltaT=25.)
     for i in range(1, n + 1):
         name_s_list = []
         for s, (amp, sigma, pos) in enumerate(arch["stimuli"]):
             name_s = f"stimulus_{i}_{s}"
             name_s_list.append(name_s)
-            sim.addElement(GaussStimulus1D(name_s, FIELD_SIZE,
-                                           sigma=sigma, amplitude=amp, position=pos,
+            sim.addElement(GaussStimulus1D(name_s, fs,
+                                           sigma=sigma, amplitude=amp, position=pos * pos_scale,
                                            circular=True, normalized=False))
         name_n   = f"noise_{i}"
         name_sum = f"sum_{i}"
         name_f   = f"field_{i}"
         name_k   = f"kernel_{i}"
 
-        sim.addElement(NormalNoise(name_n, FIELD_SIZE, amplitude=0.))
-        sim.addElement(SumInputs(name_sum, FIELD_SIZE), name_s_list + [name_n])
-        sim.addElement(NeuralField(name_f, FIELD_SIZE, tau=25, h=arch["h"], beta=100),
+        sim.addElement(NormalNoise(name_n, fs, amplitude=NOISE_AMP))
+        sim.addElement(SumInputs(name_sum, fs), name_s_list + [name_n])
+        sim.addElement(NeuralField(name_f, fs, tau=25, h=arch["h"], beta=100),
                        inputLabels=name_sum)
 
         k = arch["kernel"]
         if k[0] == "gauss" and k[3] == 0.0:
-            sim.addElement(GaussKernel1D(name_k, FIELD_SIZE,
+            sim.addElement(GaussKernel1D(name_k, fs,
                                          sigma=k[1], amplitude=k[2],
                                          circular=True, normalized=True),
                            inputLabels=name_f, inputComponents="output",
                            targetLabels=name_f)
         elif k[0] == "gauss":
-            sim.addElement(LateralInteractions1D(name_k, FIELD_SIZE,
+            sim.addElement(LateralInteractions1D(name_k, fs,
                                                  sigmaExc=k[1], amplitudeExc=k[2],
                                                  sigmaInh=0.0, amplitudeInh=0.0,
                                                  amplitudeGlobal=k[3],
@@ -115,7 +116,7 @@ def create_sim(n: int, arch: dict):
                            inputLabels=name_f, inputComponents="output",
                            targetLabels=name_f)
         else:  # mexican_hat
-            sim.addElement(LateralInteractions1D(name_k, FIELD_SIZE,
+            sim.addElement(LateralInteractions1D(name_k, fs,
                                                  sigmaExc=k[1], amplitudeExc=k[2],
                                                  sigmaInh=k[3], amplitudeInh=k[4],
                                                  amplitudeGlobal=0.0,
@@ -126,10 +127,11 @@ def create_sim(n: int, arch: dict):
 
 
 def main():
-    # Usage: cosivina_python_benchmark.py [arch] [variant] [N_csv]
-    #   arch     detection|selection|memory|insufficient|multi-peak (default detection)
-    #   variant  numba|nonumba  (default numba)
-    #   N_csv    comma-separated field counts (default 10,50,100)
+    # Usage: cosivina_python_benchmark.py [arch] [variant] [N_csv] [field_size]
+    #   arch        detection|selection|memory|multi-peak (default detection)
+    #   variant     numba|nonumba  (default numba)
+    #   N_csv       comma-separated field counts (default 5,10,50,100)
+    #   field_size  field length (default 100)
     arch_name = sys.argv[1] if len(sys.argv) > 1 else "detection"
     if arch_name not in ARCHS:
         print(f"Unknown arch '{arch_name}'; defaulting to detection")
@@ -141,6 +143,7 @@ def main():
         variant = "numba"
     n_values = ([int(x) for x in sys.argv[3].split(",") if x]
                 if len(sys.argv) > 3 else N_VALUES)
+    field_size = int(sys.argv[4]) if len(sys.argv) > 4 else BASE_SIZE
 
     load_cosivina(variant)
 
@@ -156,13 +159,13 @@ def main():
         except Exception:
             pass
 
-    print(f"cosivina-python headless benchmark [arch={arch_name} variant={variant}] -> {OUTPUT}")
+    print(f"cosivina-python headless benchmark [arch={arch_name} variant={variant} fs={field_size}] -> {OUTPUT}")
 
     with open(OUTPUT, "a") as fid:
         for n in n_values:
-            print(f"=== cosivina-python/{variant}  {arch_name}  N={n} ===")
+            print(f"=== cosivina-python/{variant}  {arch_name}  fs={field_size}  N={n} ===")
 
-            sim = create_sim(n, arch)
+            sim = create_sim(n, arch, field_size)
             sim.init()
             for _ in range(WARMUP_STEPS):
                 sim.step()
@@ -174,7 +177,7 @@ def main():
                     sim.step()
                 elapsed = time.perf_counter() - t0
                 sps = TIMED_STEPS / elapsed
-                fid.write(f"cosivina-python,{variant},{arch_name},headless,{n},{r},{sps:.2f}\n")
+                fid.write(f"cosivina-python,{variant},{arch_name},{field_size},headless,{n},{r},{sps:.2f}\n")
                 fid.flush()
                 print(f"  headless  run={r}  {sps:.1f} steps/s")
 

@@ -24,18 +24,19 @@ if (is.null(ROOT) || ROOT == "") ROOT <- normalizePath(".")
 
 # -- Data ----------------------------------------------------------------------
 
-col_nms  <- c("framework", "variant", "arch", "mode", "N", "run", "steps_per_second")
+col_nms  <- c("framework", "variant", "arch", "field_size", "mode", "N", "run", "steps_per_second")
 col_spec <- cols(
   framework        = col_character(),
   variant          = col_character(),
   arch             = col_character(),
+  field_size       = col_integer(),
   mode             = col_character(),
   N                = col_integer(),
   run              = col_integer(),
   steps_per_second = col_double()
 )
 
-ARCH_ORDER <- c("detection", "selection", "memory", "insufficient", "multi-peak")
+ARCH_ORDER <- c("detection", "selection", "memory", "multi-peak")
 
 make_fwv <- function(framework, variant) {
   ifelse(variant == "default", framework, paste0(framework, " (", variant, ")"))
@@ -56,7 +57,7 @@ timings <- bind_rows(
 
 summary_df <- timings %>%
   filter(mode == "headless") %>%
-  group_by(fwv, arch, N) %>%
+  group_by(fwv, arch, field_size, N) %>%
   summarise(
     median_sps = median(steps_per_second),
     mean_sps   = mean(steps_per_second),
@@ -66,7 +67,9 @@ summary_df <- timings %>%
     ci95_hi    = ifelse(n() > 1, mean(steps_per_second) + qt(0.975, n()-1)*sd(steps_per_second)/sqrt(n()), median_sps),
     .groups    = "drop"
   ) %>%
-  mutate(arch = factor(arch, levels = intersect(ARCH_ORDER, unique(arch))))
+  mutate(arch = factor(arch, levels = intersect(ARCH_ORDER, unique(arch))),
+         size_label = factor(sprintf("grid=%dx%d", field_size, field_size),
+                             levels = sprintf("grid=%dx%d", sort(unique(field_size)), sort(unique(field_size)))))
 
 # -- Cosmetics -----------------------------------------------------------------
 
@@ -126,10 +129,10 @@ p_throughput <- ggplot(
   ) +
   geom_line(linewidth = 0.9) +
   geom_point(size = 2.6) +
-  facet_wrap(~ arch, ncol = 3) +
+  facet_grid(arch ~ size_label, scales = "free_y") +
   scale_x_log10(
-    breaks = c(10, 50, 100, 500, 1000),
-    labels = c("10", "50", "100", "500", "1k")
+    breaks = c(5, 10, 50, 100, 500, 1000),
+    labels = c("5", "10", "50", "100", "500", "1k")
   ) +
   scale_y_log10(labels = label_comma()) +
   scale_colour_manual(values = fw_colors, labels = fw_labels) +
@@ -137,7 +140,7 @@ p_throughput <- ggplot(
   scale_shape_manual(values = fw_shapes, labels = fw_labels) +
   scale_linetype_manual(values = fw_lty, labels = fw_labels) +
   labs(
-    title    = "Simulation throughput by architecture (2D, 50x50 fields)",
+    title    = "Simulation throughput by architecture (2D)",
     subtitle = "Steps per second · headless · point = median · ribbon = 95% CI of the mean",
     x        = "Number of independent neural fields (N)",
     y        = "Steps per second (log scale)",
@@ -169,12 +172,12 @@ cat("Saved: fig_benchmark_throughput.png\n")
 ref_N <- 100
 cosivina_ref <- summary_df %>%
   filter(fwv == "cosivina", N == ref_N) %>%
-  select(arch, ref_sps = median_sps)
+  select(arch, field_size, ref_sps = median_sps)
 
 speedup_order <- setdiff(fw_order, "cosivina")
 speedup_df <- summary_df %>%
   filter(fwv != "cosivina", N == ref_N) %>%
-  inner_join(cosivina_ref, by = "arch") %>%
+  inner_join(cosivina_ref, by = c("arch", "field_size")) %>%
   mutate(
     speedup    = median_sps / ref_sps,
     speedup_lo = ci95_lo / ref_sps,
@@ -197,6 +200,7 @@ if (nrow(speedup_df) > 0) {
       linewidth = 0.4, colour = "grey25"
     ) +
     geom_hline(yintercept = 1, linetype = "dashed", colour = "grey30", linewidth = 0.6) +
+    facet_wrap(~ size_label, ncol = 2, scales = "free_y") +
     geom_text(
       aes(label = sprintf("%.1fx", speedup)),
       position = position_dodge(width = 0.78),

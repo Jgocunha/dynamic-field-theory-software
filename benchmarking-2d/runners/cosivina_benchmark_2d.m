@@ -1,15 +1,15 @@
 %% cosivina_benchmark_2d.m
-% Benchmarks Cosivina 2D DFT simulations (50x50) in headless mode across the five
-% architectures (detection / selection / memory / insufficient / multi-peak),
-% reusing the representative validation sim of each band with the 2D amplitude
-% adjustments (positions halved; selection kernel amp x4; memory exc/inh x2.5 +
-% global -0.05). Appends results to data/timings-cosivina-2d.csv.
+% Benchmarks Cosivina 2D DFT simulations in headless mode across the four canonical
+% architectures (detection / selection / memory / multi-peak) and two grid sizes
+% (25x25, 50x50), reusing the representative validation sim of each band with the 2D
+% amplitude adjustments (positions on the 50-grid; selection kernel amp x4; memory
+% exc/inh x2.5 + global -0.05). Appends results to data/timings-cosivina-2d.csv.
 %
 % Prerequisites:
 %   - Cosivina on the MATLAB path
 %   - Run from the benchmarking-2d/ root directory
 %
-% Output rows: cosivina,<arch>,<mode>,<N>,<run>,<steps_per_second>
+% Output rows: cosivina,default,<arch>,<grid_side>,<mode>,<N>,<run>,<steps_per_second>
 
 clc;
 
@@ -24,11 +24,13 @@ OUTPUT_FILE = fullfile(DATA_DIR, 'timings-cosivina-2d.csv');
 WARMUP_STEPS = 200;
 TIMED_STEPS  = 5000;
 N_RUNS       = 10;
+NOISE_AMP    = 0.1;    % benchmark uses A>0 so the RNG cost is measured
+BASE_GRID    = 50;     % reference grid side the arch positions are defined on
 
-% Architecture matrix: all 5 archs across N (answers both "vs architecture" and
-% "vs number of fields"; no separate scaling sweep).
-ARCH_LIST    = {'detection', 'selection', 'memory', 'insufficient', 'multi-peak'};
-ARCH_N       = [10, 50, 100];
+% Architecture x N x grid-size matrix: 4 canonical archs, across N and grid side.
+ARCH_LIST    = {'detection', 'selection', 'memory', 'multi-peak'};
+ARCH_N       = [5, 10, 50, 100];
+GRID_SIZES   = [100, 200];
 
 if ~exist(DATA_DIR, 'dir')
     mkdir(DATA_DIR);
@@ -40,7 +42,10 @@ if fid == -1
 end
 
 for ai = 1:length(ARCH_LIST)
-    run_arch(fid, ARCH_LIST{ai}, ARCH_N, WARMUP_STEPS, TIMED_STEPS, N_RUNS);
+    for gi = 1:length(GRID_SIZES)
+        run_arch(fid, ARCH_LIST{ai}, ARCH_N, GRID_SIZES(gi), BASE_GRID, ...
+                 NOISE_AMP, WARMUP_STEPS, TIMED_STEPS, N_RUNS);
+    end
 end
 
 fclose(fid);
@@ -51,12 +56,12 @@ fprintf('\nDone. Results appended to %s\n', OUTPUT_FILE);
 % Helpers
 % ===========================================================================
 
-function run_arch(fid, archName, N_VALUES, WARMUP_STEPS, TIMED_STEPS, N_RUNS)
+function run_arch(fid, archName, N_VALUES, gridSide, baseGrid, noiseAmp, WARMUP_STEPS, TIMED_STEPS, N_RUNS)
     for ni = 1:length(N_VALUES)
         N = N_VALUES(ni);
-        fprintf('=== Cosivina 2D  %s  N=%d ===\n', archName, N);
+        fprintf('=== Cosivina 2D  %s  grid=%dx%d  N=%d ===\n', archName, gridSide, gridSide, N);
 
-        sim = build_sim(N, archName);
+        sim = build_sim(N, archName, gridSide, baseGrid, noiseAmp);
         sim.init();
         for t = 1:WARMUP_STEPS; sim.step(); end
 
@@ -66,16 +71,17 @@ function run_arch(fid, archName, N_VALUES, WARMUP_STEPS, TIMED_STEPS, N_RUNS)
             for t = 1:TIMED_STEPS; sim.step(); end
             elapsed = toc(t0);
             sps = TIMED_STEPS / elapsed;
-            fprintf(fid, 'cosivina,default,%s,headless,%d,%d,%.2f\n', archName, N, r, sps);
+            fprintf(fid, 'cosivina,default,%s,%d,headless,%d,%d,%.2f\n', archName, gridSide, N, r, sps);
             fprintf('  headless  run=%d  %.1f steps/s\n', r, sps);
         end
     end
 end
 
-function sim = build_sim(N, archName)
+function sim = build_sim(N, archName, gridSide, baseGrid, noiseAmp)
     % Representative-sim parameters per architecture (validation sims
-    % 001/021/041/061/081, 2D-adjusted). See generate_simulations_2d.py.
-    fieldSize = [50, 50];
+    % 001/021/041/081, 2D-adjusted). See generate_simulations_2d.py.
+    fieldSize = [gridSide, gridSide];
+    pos_scale = gridSide / baseGrid;
     sim = Simulator();
     sim.deltaT = 25;
 
@@ -89,9 +95,6 @@ function sim = build_sim(N, archName)
         case 'memory'
             h = -5.0;  stimuli = [15.0 5 25];
             kernel = {'mexican_hat', 3.4, 44.25, 8.9, 33.75, -0.05};
-        case 'insufficient'
-            h = -12.0; stimuli = [5.0 5 25];
-            kernel = {'gauss', 3, 3.0, 0.0};
         case 'multi-peak'
             h = -8.0;  stimuli = [12.0 5 12.5; 12.0 5 37.5];
             kernel = {'gauss', 2, 5.0, 0.0};
@@ -113,10 +116,10 @@ function sim = build_sim(N, archName)
             % GaussStimulus2D(name, size, sigmaY, sigmaX, amp, posY, posX, circY, circX, norm)
             sim.addElement(GaussStimulus2D(name_s, fieldSize, ...
                 stimuli(s,2), stimuli(s,2), stimuli(s,1), ...
-                stimuli(s,3), stimuli(s,3), true, true, false));
+                stimuli(s,3) * pos_scale, stimuli(s,3) * pos_scale, true, true, false));
         end
 
-        sim.addElement(NormalNoise(name_n, fieldSize, 0));
+        sim.addElement(NormalNoise(name_n, fieldSize, noiseAmp));
         sim.addElement(SumInputs(name_sum, fieldSize), [stim_names, {name_n}]);
         sim.addElement(NeuralField(name_f, fieldSize, 25, h, 100), name_sum);
 

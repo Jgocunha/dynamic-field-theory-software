@@ -8,10 +8,10 @@
 %   - Cosivina on the MATLAB path
 %   - Run from the benchmarking/ root directory
 %
-% Output rows: cosivina,<arch>,<mode>,<N>,<run>,<steps_per_second>
+% Output rows: cosivina,default,<arch>,<field_size>,<mode>,<N>,<run>,<steps_per_second>
 %
-% To reproduce the architecture matrix and the detection scaling sweep, run as-is.
-% Edit ARCH_LIST / the per-arch N values below to change scope.
+% To reproduce the architecture x N x field-size matrix, run as-is.
+% Edit ARCH_LIST / ARCH_N / FIELD_SIZES below to change scope.
 
 clc;
 
@@ -26,11 +26,13 @@ OUTPUT_FILE = fullfile(DATA_DIR, 'timings-cosivina.csv');
 WARMUP_STEPS = 200;
 TIMED_STEPS  = 5000;
 N_RUNS       = 10;
+NOISE_AMP    = 0.1;    % benchmark uses A>0 so the RNG cost is measured
+BASE_SIZE    = 100;    % reference grid the arch positions are defined on
 
-% Architecture matrix: all 5 archs across N (answers both "vs architecture" and
-% "vs number of fields"; no separate scaling sweep).
-ARCH_LIST    = {'detection', 'selection', 'memory', 'insufficient', 'multi-peak'};
-ARCH_N       = [10, 50, 100];
+% Architecture x N x field-size matrix: 4 canonical archs, across N and field size.
+ARCH_LIST    = {'detection', 'selection', 'memory', 'multi-peak'};
+ARCH_N       = [5, 10, 50, 100];
+FIELD_SIZES  = [100, 500];
 
 if ~exist(DATA_DIR, 'dir')
     mkdir(DATA_DIR);
@@ -42,7 +44,10 @@ if fid == -1
 end
 
 for ai = 1:length(ARCH_LIST)
-    run_arch(fid, ARCH_LIST{ai}, ARCH_N, WARMUP_STEPS, TIMED_STEPS, N_RUNS);
+    for fi = 1:length(FIELD_SIZES)
+        run_arch(fid, ARCH_LIST{ai}, ARCH_N, FIELD_SIZES(fi), BASE_SIZE, ...
+                 NOISE_AMP, WARMUP_STEPS, TIMED_STEPS, N_RUNS);
+    end
 end
 
 fclose(fid);
@@ -53,12 +58,12 @@ fprintf('\nDone. Results appended to %s\n', OUTPUT_FILE);
 % Helpers
 % ===========================================================================
 
-function run_arch(fid, archName, N_VALUES, WARMUP_STEPS, TIMED_STEPS, N_RUNS)
+function run_arch(fid, archName, N_VALUES, fieldSize, baseSize, noiseAmp, WARMUP_STEPS, TIMED_STEPS, N_RUNS)
     for ni = 1:length(N_VALUES)
         N = N_VALUES(ni);
-        fprintf('=== Cosivina  %s  N=%d ===\n', archName, N);
+        fprintf('=== Cosivina  %s  fs=%d  N=%d ===\n', archName, fieldSize, N);
 
-        sim = build_sim(N, archName);
+        sim = build_sim(N, archName, fieldSize, baseSize, noiseAmp);
         sim.init();
         for t = 1:WARMUP_STEPS; sim.step(); end
 
@@ -68,16 +73,16 @@ function run_arch(fid, archName, N_VALUES, WARMUP_STEPS, TIMED_STEPS, N_RUNS)
             for t = 1:TIMED_STEPS; sim.step(); end
             elapsed = toc(t0);
             sps = TIMED_STEPS / elapsed;
-            fprintf(fid, 'cosivina,default,%s,headless,%d,%d,%.2f\n', archName, N, r, sps);
+            fprintf(fid, 'cosivina,default,%s,%d,headless,%d,%d,%.2f\n', archName, fieldSize, N, r, sps);
             fprintf('  headless  run=%d  %.1f steps/s\n', r, sps);
         end
     end
 end
 
-function sim = build_sim(N, archName)
+function sim = build_sim(N, archName, fieldSize, baseSize, noiseAmp)
     % Representative-sim parameters per architecture (validation sims
-    % 001/021/041/061/081). See cross-platform-validation/generate_simulations.py.
-    fieldSize = 100;
+    % 001/021/041/081). See cross-platform-validation/generate_simulations.py.
+    pos_scale = fieldSize / baseSize;
     sim = Simulator();
     sim.deltaT = 25;
 
@@ -91,9 +96,6 @@ function sim = build_sim(N, archName)
         case 'memory'
             h = -5.0;  stimuli = [15.0 5 50];
             kernel = {'mexican_hat', 3.4, 17.7, 8.9, 13.5};
-        case 'insufficient'
-            h = -12.0; stimuli = [5.0 5 50];
-            kernel = {'gauss', 3, 3.0, 0.0};
         case 'multi-peak'
             h = -8.0;  stimuli = [12.0 5 25; 12.0 5 75];
             kernel = {'gauss', 2, 5.0, 0.0};
@@ -113,10 +115,10 @@ function sim = build_sim(N, archName)
             name_s = ['stimulus_' suffix '_' num2str(s)];
             stim_names{s} = name_s;
             sim.addElement(GaussStimulus1D(name_s, fieldSize, ...
-                stimuli(s,2), stimuli(s,1), stimuli(s,3), true, false));
+                stimuli(s,2), stimuli(s,1), stimuli(s,3) * pos_scale, true, false));
         end
 
-        sim.addElement(NormalNoise(name_n, fieldSize, 0));
+        sim.addElement(NormalNoise(name_n, fieldSize, noiseAmp));
         sim.addElement(SumInputs(name_sum, fieldSize), [stim_names, {name_n}]);
         sim.addElement(NeuralField(name_f, fieldSize, 25, h, 100), name_sum);
 

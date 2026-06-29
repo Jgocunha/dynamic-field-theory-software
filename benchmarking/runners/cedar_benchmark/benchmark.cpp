@@ -17,6 +17,7 @@
 
 #include "cedar/processing/Group.h"
 #include "cedar/processing/StepTime.h"
+#include "cedar/processing/Triggerable.h"
 #include "cedar/dynamics/fields/NeuralField.h"
 #include "cedar/auxiliaries/GlobalClock.h"
 #include "cedar/units/Time.h"
@@ -36,9 +37,10 @@
 namespace fs = std::filesystem;
 
 // Protocol / field constants (match the 1D benchmark spec).
-static constexpr int    FIELD_SIZE   = 100;
+static constexpr int    BASE_SIZE    = 100;    // reference grid the arch positions are defined on
 static constexpr double TAU          = 25.0;
 static constexpr double BETA         = 100.0;
+static constexpr double NOISE_GAIN   = 0.1;    // benchmark uses A>0 so the RNG cost is measured
 static constexpr int    WARMUP_STEPS = 200;
 static constexpr int    TIMED_STEPS  = 5000;
 static constexpr int    N_RUNS       = 10;
@@ -47,9 +49,9 @@ static const cedar::unit::Time STEP_TIME(25.0 * cedar::unit::milli * cedar::unit
 
 // ---------------------------------------------------------------------------
 // Architecture definitions — reuse the representative validation sim of each band
-// (detection 001, selection 021, memory 041, insufficient 061, multi-peak 081).
-// Matches the dnfc benchmark runner's Arch set and the cross-platform-validation
-// Cedar JSON generator (build_cedar_json_str in generate_simulations.py).
+// (detection 001, selection 021, memory 041, multi-peak 081). Matches the dnfc
+// benchmark runner's Arch set and the cross-platform-validation Cedar JSON
+// generator (build_cedar_json_str in generate_simulations.py).
 // ---------------------------------------------------------------------------
 
 enum class KernelType { Gauss, MexicanHat };
@@ -74,8 +76,6 @@ static const Arch& get_arch(const std::string& name)
             {{10.0, 5.0, 25.0}, {10.5, 5.0, 75.0}}},
         {"memory",       -5.0,  KernelType::MexicanHat, 0,0,0,           3.4,17.7,8.9,13.5,
             {{15.0, 5.0, 50.0}}},
-        {"insufficient",-12.0,  KernelType::Gauss,      3.0, 3.0, 0.0,   0,0,0,0,
-            {{5.0, 5.0, 50.0}}},
         {"multi-peak",   -8.0,  KernelType::Gauss,      2.0, 5.0, 0.0,   0,0,0,0,
             {{12.0, 5.0, 25.0}, {12.0, 5.0, 75.0}}},
     };
@@ -97,25 +97,27 @@ static std::string lateral_kernels_block(const Arch& arch)
     if (arch.kernel == KernelType::Gauss) {
         k << "{\"cedar.aux.kernel.Gauss\": {\n"
              "                \"dimensionality\": \"1\", \"anchor\": [\"0\"], \"amplitude\": \"" << arch.kAmp << "\",\n"
-             "                \"sigmas\": [\"" << arch.kSigma << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"10\"\n"
+             "                \"sigmas\": [\"" << arch.kSigma << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"5\"\n"
              "            }}";
     } else {
         k << "{\n"
              "                \"cedar.aux.kernel.Gauss\": {\n"
              "                    \"dimensionality\": \"1\", \"anchor\": [\"0\"], \"amplitude\": \"" << arch.kAmpExc << "\",\n"
-             "                    \"sigmas\": [\"" << arch.kSigmaExc << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"10\"\n"
+             "                    \"sigmas\": [\"" << arch.kSigmaExc << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"5\"\n"
              "                },\n"
              "                \"cedar.aux.kernel.Gauss\": {\n"
              "                    \"dimensionality\": \"1\", \"anchor\": [\"0\"], \"amplitude\": \"-" << arch.kAmpInh << "\",\n"
-             "                    \"sigmas\": [\"" << arch.kSigmaInh << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"10\"\n"
+             "                    \"sigmas\": [\"" << arch.kSigmaInh << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"5\"\n"
              "                }\n"
              "            }";
     }
     return k.str();
 }
 
-static std::string build_architecture_json(int n, const Arch& arch, const std::string& variant)
+static std::string build_architecture_json(int n, const Arch& arch, const std::string& variant,
+                                           int field_size)
 {
+    const double pos_scale = static_cast<double>(field_size) / BASE_SIZE;
     const std::string lateral = lateral_kernels_block(arch);
     const std::string global_inh =
         (arch.kernel == KernelType::Gauss && arch.kGlobal != 0.0)
@@ -138,8 +140,8 @@ static std::string build_architecture_json(int n, const Arch& arch, const std::s
             steps <<
               "        \"cedar.processing.sources.GaussInput\": {\n"
               "            \"name\": \"" << gi << "\",\n"
-              "            \"dimensionality\": \"1\", \"sizes\": [\"" << FIELD_SIZE << "\"],\n"
-              "            \"amplitude\": \"" << st.amp << "\", \"centers\": [\"" << st.pos << "\"],\n"
+              "            \"dimensionality\": \"1\", \"sizes\": [\"" << field_size << "\"],\n"
+              "            \"amplitude\": \"" << st.amp << "\", \"centers\": [\"" << (st.pos * pos_scale) << "\"],\n"
               "            \"sigma\": [\"" << st.sigma << "\"], \"cyclic\": \"true\", \"comments\": \"\"\n"
               "        }";
             if (!first_conn) conns << ",\n"; first_conn = false;
@@ -151,9 +153,9 @@ static std::string build_architecture_json(int n, const Arch& arch, const std::s
         steps <<
           "        \"cedar.dynamics.NeuralField\": {\n"
           "            \"name\": \"" << nf << "\",\n"
-          "            \"dimensionality\": \"1\", \"sizes\": [\"" << FIELD_SIZE << "\"],\n"
+          "            \"dimensionality\": \"1\", \"sizes\": [\"" << field_size << "\"],\n"
           "            \"time scale\": \"" << TAU << "\", \"resting level\": \"" << arch.h << "\",\n"
-          "            \"input noise gain\": \"0\",\n"
+          "            \"input noise gain\": \"" << NOISE_GAIN << "\",\n"
           "            \"sigmoid\": {\"type\": \"cedar.aux.math.AbsSigmoid\", \"threshold\": \"0\", \"beta\": \"" << BETA << "\"},\n"
           "            \"global inhibition\": \"" << global_inh << "\",\n"
           "            \"lateral kernels\": " << lateral << ",\n"
@@ -188,12 +190,14 @@ static std::string build_architecture_json(int n, const Arch& arch, const std::s
 // Benchmark one N value
 // ---------------------------------------------------------------------------
 
-static void run_benchmark(int n, const Arch& arch, const std::string& variant, const std::string& outfile)
+static void run_benchmark(int n, const Arch& arch, const std::string& variant,
+                          int field_size, const std::string& outfile)
 {
     // Write the architecture to a temp JSON and load it.
     const fs::path tmp = fs::temp_directory_path() /
-        ("cedar_bench_" + arch.name + "_" + variant + "_N" + std::to_string(n) + ".json");
-    { std::ofstream f(tmp); f << build_architecture_json(n, arch, variant); }
+        ("cedar_bench_" + arch.name + "_" + variant + "_fs" + std::to_string(field_size) +
+         "_N" + std::to_string(n) + ".json");
+    { std::ofstream f(tmp); f << build_architecture_json(n, arch, variant, field_size); }
 
     cedar::proc::GroupPtr group(new cedar::proc::Group());
     group->readJson(tmp.string());
@@ -217,6 +221,22 @@ static void run_benchmark(int n, const Arch& arch, const std::string& variant, c
     // Warm-up
     for (int t = 0; t < WARMUP_STEPS; ++t) step_all();
 
+    // Guard: if any field entered an exception state during warm-up (e.g. the FFTW
+    // engine throwing "kernel size is too big for FFTW convolution" when the kernel
+    // is wider than the field), the steps did no real work and the resulting "sps"
+    // would be meaningless exception-handling throughput. Skip the cell entirely.
+    for (auto& f : fields) {
+        const auto st = f->getState();
+        if (st == cedar::proc::Triggerable::STATE_EXCEPTION ||
+            st == cedar::proc::Triggerable::STATE_EXCEPTION_ON_START) {
+            std::fprintf(stderr,
+                "SKIP cedar/%s %s fs=%d N=%d — field in exception state (kernel does not fit field?); no rows written\n",
+                variant.c_str(), arch.name.c_str(), field_size, n);
+            std::error_code ec; fs::remove(tmp, ec);
+            return;
+        }
+    }
+
     std::FILE* fp = std::fopen(outfile.c_str(), "a");
     if (!fp) { std::fprintf(stderr, "Cannot open %s\n", outfile.c_str()); return; }
 
@@ -227,8 +247,10 @@ static void run_benchmark(int n, const Arch& arch, const std::string& variant, c
 
         const double elapsed = std::chrono::duration<double>(t1 - t0).count();
         const double sps     = TIMED_STEPS / elapsed;
-        std::fprintf(fp,  "cedar,%s,%s,headless,%d,%d,%.2f\n", variant.c_str(), arch.name.c_str(), n, run, sps);
-        std::printf("cedar/%-6s %-12s N=%4d run=%d  %.1f steps/s\n", variant.c_str(), arch.name.c_str(), n, run, sps);
+        std::fprintf(fp,  "cedar,%s,%s,%d,headless,%d,%d,%.2f\n",
+                     variant.c_str(), arch.name.c_str(), field_size, n, run, sps);
+        std::printf("cedar/%-6s %-12s fs=%4d N=%4d run=%d  %.1f steps/s\n",
+                    variant.c_str(), arch.name.c_str(), field_size, n, run, sps);
     }
     std::fclose(fp);
     std::error_code ec; fs::remove(tmp, ec);
@@ -240,8 +262,9 @@ int main(int argc, char* argv[])
     cv::setNumThreads(0);   // force single-threaded OpenCV convolution (fair single-thread timing)
     cedar::aux::GlobalClockSingleton::getInstance()->start();
 
-    // Usage: benchmark [output_csv] [arch] [variant] [N_csv]
-    //   variant: opencv (default) | fftw  — selects the convolution engine
+    // Usage: benchmark [output_csv] [arch] [variant] [N_csv] [field_size]
+    //   variant:    opencv (default) | fftw  — selects the convolution engine
+    //   field_size: field length (default 100)
     const std::string outfile  = (argc > 1) ? argv[1] : "timings-cedar.csv";
     const std::string archName = (argc > 2) ? argv[2] : "detection";
     const std::string variant  = (argc > 3) ? argv[3] : "opencv";
@@ -259,12 +282,14 @@ int main(int argc, char* argv[])
             pos = comma + 1;
         }
     } else {
-        Ns = {10, 50, 100};
+        Ns = {5, 10, 50, 100};
     }
 
-    std::printf("Cedar headless benchmark [arch=%s variant=%s] (real API, cv threads=0) -> %s\n",
-                arch.name.c_str(), variant.c_str(), outfile.c_str());
+    const int field_size = (argc > 5) ? std::stoi(argv[5]) : BASE_SIZE;
+
+    std::printf("Cedar headless benchmark [arch=%s variant=%s fs=%d] (real API, cv threads=0) -> %s\n",
+                arch.name.c_str(), variant.c_str(), field_size, outfile.c_str());
     for (int n : Ns)
-        run_benchmark(n, arch, variant, outfile);
+        run_benchmark(n, arch, variant, field_size, outfile);
     return 0;
 }

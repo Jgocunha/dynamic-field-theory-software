@@ -9,7 +9,7 @@
 # cedar (opencv | fftw), dnfc. The framework+variant pair is the display key `fwv`.
 #
 # CSV format (no header, comma-separated):
-#   framework, variant, arch, mode, N, run, steps_per_second
+#   framework, variant, arch, field_size, mode, N, run, steps_per_second
 #
 # Run from the benchmarking/ root directory:
 #   Rscript analysis.R
@@ -33,12 +33,13 @@ col_spec <- cols(
   framework        = col_character(),
   variant          = col_character(),
   arch             = col_character(),
+  field_size       = col_integer(),
   mode             = col_character(),
   N                = col_integer(),
   run              = col_integer(),
   steps_per_second = col_double()
 )
-col_nms <- c("framework", "variant", "arch", "mode", "N", "run", "steps_per_second")
+col_nms <- c("framework", "variant", "arch", "field_size", "mode", "N", "run", "steps_per_second")
 
 # framework+variant display label: bare framework when variant is "default",
 # else "framework (variant)" — e.g. "cedar (fftw)", "cosivina-python (nonumba)".
@@ -61,15 +62,15 @@ timings <- bind_rows(
 
 cat(sprintf("Loaded %d rows total\n\n", nrow(timings)))
 
-ARCH_ORDER <- c("detection", "selection", "memory", "insufficient", "multi-peak")
+ARCH_ORDER <- c("detection", "selection", "memory", "multi-peak")
 
 timings <- timings %>% mutate(fwv = make_fwv(framework, variant))
 
 # ---------------------------------------------------------------------------
-# Aggregate (per framework-variant x arch x N)
+# Aggregate (per framework-variant x arch x field_size x N)
 # ---------------------------------------------------------------------------
 summary_df <- timings %>%
-  group_by(framework, variant, fwv, arch, mode, N) %>%
+  group_by(framework, variant, fwv, arch, field_size, mode, N) %>%
   summarise(
     median_sps = median(steps_per_second),
     mean_sps   = mean(steps_per_second),
@@ -89,46 +90,50 @@ summary_df <- timings %>%
   )
 
 archs_present <- intersect(ARCH_ORDER, unique(summary_df$arch))
+sizes_present <- sort(unique(summary_df$field_size))
 
 # ---------------------------------------------------------------------------
-# Per-architecture tables
+# Per-architecture x field-size tables
 # ---------------------------------------------------------------------------
 for (a in archs_present) {
-  cat(sprintf("============================================================\n"))
-  cat(sprintf("ARCHITECTURE: %s\n", a))
-  cat(sprintf("============================================================\n"))
+  for (fs in sizes_present) {
+    sub <- summary_df %>% filter(mode == "headless", arch == a, field_size == fs)
+    if (nrow(sub) == 0) next
 
-  sub <- summary_df %>% filter(mode == "headless", arch == a)
+    cat(sprintf("============================================================\n"))
+    cat(sprintf("ARCHITECTURE: %s   field_size: %d\n", a, fs))
+    cat(sprintf("============================================================\n"))
 
-  wide <- sub %>%
-    mutate(label = sprintf("%.0f", round(median_sps))) %>%
-    select(fwv, N, label) %>%
-    pivot_wider(names_from = N, values_from = label, names_prefix = "N=") %>%
-    arrange(fwv)
-  cat("--- median steps/second (>=10 runs) ---\n")
-  print(as.data.frame(wide))
-
-  detail <- sub %>%
-    mutate(stats = sprintf("%.0f [%.0f-%.0f]", median_sps, min_sps, max_sps)) %>%
-    select(fwv, N, stats) %>%
-    pivot_wider(names_from = N, values_from = stats, names_prefix = "N=") %>%
-    arrange(fwv)
-  cat("--- median [min-max] ---\n")
-  print(as.data.frame(detail))
-
-  # Speedup of every variant relative to Cosivina (MATLAB) at each N.
-  ref <- sub %>% filter(framework == "cosivina") %>% select(N, ref_sps = median_sps)
-  if (nrow(ref) > 0) {
-    sp <- sub %>%
-      inner_join(ref, by = "N") %>%
-      mutate(speedup = round(median_sps / ref_sps, 2)) %>%
-      select(fwv, N, speedup) %>%
-      pivot_wider(names_from = N, values_from = speedup, names_prefix = "N=") %>%
+    wide <- sub %>%
+      mutate(label = sprintf("%.0f", round(median_sps))) %>%
+      select(fwv, N, label) %>%
+      pivot_wider(names_from = N, values_from = label, names_prefix = "N=") %>%
       arrange(fwv)
-    cat("--- speedup vs Cosivina (MATLAB) ---\n")
-    print(as.data.frame(sp))
+    cat("--- median steps/second (>=10 runs) ---\n")
+    print(as.data.frame(wide))
+
+    detail <- sub %>%
+      mutate(stats = sprintf("%.0f [%.0f-%.0f]", median_sps, min_sps, max_sps)) %>%
+      select(fwv, N, stats) %>%
+      pivot_wider(names_from = N, values_from = stats, names_prefix = "N=") %>%
+      arrange(fwv)
+    cat("--- median [min-max] ---\n")
+    print(as.data.frame(detail))
+
+    # Speedup of every variant relative to Cosivina (MATLAB) at each N.
+    ref <- sub %>% filter(framework == "cosivina") %>% select(N, ref_sps = median_sps)
+    if (nrow(ref) > 0) {
+      sp <- sub %>%
+        inner_join(ref, by = "N") %>%
+        mutate(speedup = round(median_sps / ref_sps, 2)) %>%
+        select(fwv, N, speedup) %>%
+        pivot_wider(names_from = N, values_from = speedup, names_prefix = "N=") %>%
+        arrange(fwv)
+      cat("--- speedup vs Cosivina (MATLAB) ---\n")
+      print(as.data.frame(sp))
+    }
+    cat("\n")
   }
-  cat("\n")
 }
 
 # ---------------------------------------------------------------------------

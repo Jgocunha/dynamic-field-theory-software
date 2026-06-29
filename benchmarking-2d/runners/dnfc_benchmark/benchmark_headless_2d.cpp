@@ -36,17 +36,18 @@
 using namespace dnf_composer;
 using namespace dnf_composer::element;
 
-static constexpr int    GRID         = 50;
+static constexpr int    BASE_GRID    = 50;    // reference grid side the arch positions are defined on
 static constexpr double TAU          = 25.0;
+static constexpr double NOISE_AMP    = 0.1;    // benchmark uses A>0 so the RNG cost is measured
 static constexpr int    WARMUP_STEPS = 200;
 static constexpr int    TIMED_STEPS  = 5000;
 static constexpr int    N_RUNS       = 10;
 
 // ── Architecture definitions (2D) ───────────────────────────────────────────
 // Reuse the representative validation sim of each band (detection 001, selection
-// 021, memory 041, insufficient 061, multi-peak 081), with the 2D amplitude
-// adjustments from cross-platform-validation-2d/generate_simulations_2d.py:
-//   positions halved (pos2d = pos/2 on the 50-grid); selection kernel amp x4;
+// 021, memory 041, multi-peak 081), with the 2D amplitude adjustments from
+// cross-platform-validation-2d/generate_simulations_2d.py:
+//   positions on the 50-grid (pos2d = pos/2); selection kernel amp x4;
 //   memory exc/inh amp x2.5 and a global inhibition of -0.05.
 
 enum class KernelType { Gauss, MexicanHat };
@@ -73,8 +74,6 @@ static const Arch& get_arch(const std::string& name)
         {"memory",       -5.0,  KernelType::MexicanHat, 0,0,0,
             3.4, 44.25, 8.9, 33.75, -0.05,   // exc 17.7*2.5, inh 13.5*2.5, global -0.05
             {{15.0, 5.0, 25.0}}},
-        {"insufficient",-12.0,  KernelType::Gauss,      3.0, 3.0, 0.0,   0,0,0,0,0,
-            {{5.0, 5.0, 25.0}}},
         {"multi-peak",   -8.0,  KernelType::Gauss,      2.0, 5.0, 0.0,   0,0,0,0,0,
             {{12.0, 5.0, 12.5}, {12.0, 5.0, 37.5}}},
     };
@@ -84,13 +83,14 @@ static const Arch& get_arch(const std::string& name)
     return archs[0];
 }
 
-static std::shared_ptr<Simulation> build_simulation(int N, const Arch& arch)
+static std::shared_ptr<Simulation> build_simulation(int N, const Arch& arch, int grid)
 {
+    const double pos_scale = static_cast<double>(grid) / BASE_GRID;
     auto sim = std::make_shared<Simulation>("bench2d", 25.0, 0.0, 0.0);
 
     for (int i = 0; i < N; ++i) {
         const std::string si = std::to_string(i);
-        const ElementDimensions dims(GRID, GRID, 1.0, 1.0);
+        const ElementDimensions dims(grid, grid, 1.0, 1.0);
 
         // Neural field (logistic sigmoid, steepness=100)
         auto field = std::make_shared<NeuralField2D>(
@@ -107,7 +107,7 @@ static std::shared_ptr<Simulation> build_simulation(int N, const Arch& arch)
             // GaussStimulus2DParameters{width, amplitude, position_x, position_y, circular, normalized}
             auto stim = std::make_shared<GaussStimulus2D>(
                 ElementCommonParameters{"stimulus_" + si + "_" + std::to_string(s), dims},
-                GaussStimulus2DParameters{st.sigma, st.amp, st.pos, st.pos, true, false});
+                GaussStimulus2DParameters{st.sigma, st.amp, st.pos * pos_scale, st.pos * pos_scale, true, false});
             sim->addElement(stim);
             field->addInput(stim);
         }
@@ -131,19 +131,19 @@ static std::shared_ptr<Simulation> build_simulation(int N, const Arch& arch)
             field->addInput(kernel);
         }
 
-        // Normal noise (amplitude=0 — present to match element count)
+        // Normal noise (A>0 so the per-step RNG cost is part of the workload)
         auto noise = std::make_shared<NormalNoise2D>(
             ElementCommonParameters{"noise_" + si, dims},
-            NormalNoise2DParameters{0.0});
+            NormalNoise2DParameters{NOISE_AMP});
         sim->addElement(noise);
         field->addInput(noise);
     }
     return sim;
 }
 
-static void run_benchmark(int N, const Arch& arch, const std::string& outfile, int timedSteps, int nRuns)
+static void run_benchmark(int N, const Arch& arch, int grid, const std::string& outfile, int timedSteps, int nRuns)
 {
-    auto sim = build_simulation(N, arch);
+    auto sim = build_simulation(N, arch, grid);
     sim->init();
 
     // Warm-up
@@ -161,8 +161,10 @@ static void run_benchmark(int N, const Arch& arch, const std::string& outfile, i
 
         double elapsed = std::chrono::duration<double>(t1 - t0).count();
         double sps     = timedSteps / elapsed;
-        std::fprintf(fp,  "dnfc,default,%s,headless,%d,%d,%.2f\n", arch.name.c_str(), N, run + 1, sps);
-        std::printf("dnfc 2D %-12s N=%4d run=%d  %.1f steps/s\n", arch.name.c_str(), N, run + 1, sps);
+        std::fprintf(fp,  "dnfc,default,%s,%d,headless,%d,%d,%.2f\n",
+                     arch.name.c_str(), grid, N, run + 1, sps);
+        std::printf("dnfc 2D %-12s fs=%dx%d N=%4d run=%d  %.1f steps/s\n",
+                    arch.name.c_str(), grid, grid, N, run + 1, sps);
         std::fflush(stdout);
     }
     std::fclose(fp);
@@ -184,15 +186,19 @@ static std::vector<int> parse_n_list(const std::string& s)
 
 int main(int argc, char* argv[])
 {
-    // Usage: benchmark_headless_2d [output_csv] [arch] [N_csv] [timed_steps] [n_runs]
+    // Usage: benchmark_headless_2d [output_csv] [arch] [N_csv] [grid_side] [timed_steps] [n_runs]
+    //   grid_side    field side length, NxN grid (default 50)
+    //   timed_steps  timed steps per run (default 5000); n_runs runs per N (default 10)
     std::string      outfile  = (argc > 1) ? argv[1] : "timings-dnfc-2d.csv";
     std::string      archName = (argc > 2) ? argv[2] : "detection";
-    std::vector<int> Ns       = (argc > 3) ? parse_n_list(argv[3]) : std::vector<int>{10, 50, 100};
-    const int        timedSteps = (argc > 4) ? std::stoi(argv[4]) : TIMED_STEPS;
-    const int        nRuns      = (argc > 5) ? std::stoi(argv[5]) : N_RUNS;
+    std::vector<int> Ns       = (argc > 3) ? parse_n_list(argv[3]) : std::vector<int>{5, 10, 50, 100};
+    const int        grid       = (argc > 4) ? std::stoi(argv[4]) : BASE_GRID;
+    const int        timedSteps = (argc > 5) ? std::stoi(argv[5]) : TIMED_STEPS;
+    const int        nRuns      = (argc > 6) ? std::stoi(argv[6]) : N_RUNS;
     const Arch& arch = get_arch(archName);
-    std::printf("dnfc 2D headless benchmark (50x50) [arch=%s] -> %s\n", arch.name.c_str(), outfile.c_str());
+    std::printf("dnfc 2D headless benchmark [arch=%s grid=%dx%d] -> %s\n",
+                arch.name.c_str(), grid, grid, outfile.c_str());
     for (int N : Ns)
-        run_benchmark(N, arch, outfile, timedSteps, nRuns);
+        run_benchmark(N, arch, grid, outfile, timedSteps, nRuns);
     return 0;
 }

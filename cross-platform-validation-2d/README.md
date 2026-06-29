@@ -53,7 +53,7 @@ self-sustaining bump while FFTW's bump collapses (0% of memory sims pass the 2e-
 same precision knife-edge as the Cedar-vs-dnfc memory case — the 2D self-sustaining bump is a
 bistable attractor, and the sub-float32-epsilon difference between the spatial and Fourier
 convolution paths tips it. It is **not** an FFTW bug (1D memory and all other 2D architectures
-agree). See `../.claude/cedar-notes.md`.
+agree).
 
 ## Results
 
@@ -126,7 +126,7 @@ variant pair is computed → 3 (AbsSig) + 3 (Heaviside) + 6 (Sigmoid) = **12**. 
   dnfc, behaviour agrees **100%** (the memory bump is present and centred identically; only its radius
   differs). The Cedar **FFTW** engine is the exception in 2D: its self-sustaining memory bump collapses
   (it does not survive the stimulus-off phase), so FFTW memory pairs disagree behaviourally — see the
-  "Cedar OpenCV vs FFTW equivalence (2D)" note above and `../.claude/cedar-notes.md`.
+  "Cedar OpenCV vs FFTW equivalence (2D)" note above.
 
 See `fig_difference_2d.pdf` for the per-type Cedar−dnfc difference maps (after the +1,+1 offset
 correction) and `fig_fields_2d.pdf` for representative 2D fields.
@@ -136,8 +136,3 @@ correction) and `fig_fields_2d.pdf` for representative 2D fields.
 - **Cedar 2D offset:** Cedar's 2D field is shifted **+1 in both axes** vs dnfc; `analysis_2d.R`
   corrects this with a 2D roll (the analog of the 1D `roll_left`). After correction, non-memory
   same-family deviations drop to ≤ 1×10⁻⁴ (memory remains float32-limited as described above).
-- **dnfc 2D loader fix:** dnfc's 2D JSON loader did not handle the `abs_sigmoid` activation function
-  (and lacked a null-guard), crashing on load. Fixed in `simulation_file_manager.cpp` to match the
-  1D path (see `../.claude/cedar-notes.md`).
-- **2D kernel re-normalization:** memory and selection required per-type amplitude adjustment for 2D
-  (a normalized 2D Gaussian is ~7.5× weaker at peak than 1D). See `test_suite_2d.md`.
