@@ -53,8 +53,8 @@ def load_cosivina(variant: str):
 BASE_SIZE    = 100     # reference grid the arch positions are defined on
 NOISE_AMP    = 0.1     # benchmark uses A>0 so the RNG cost is measured
 WARMUP_STEPS = 200
-TIMED_STEPS  = 5000
-N_RUNS       = 10
+TIMED_STEPS  = 2000
+N_RUNS       = 5
 N_VALUES     = [5, 10, 50, 100]
 
 # Architecture definitions — reuse the representative validation sim of each band

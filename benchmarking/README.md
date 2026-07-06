@@ -34,7 +34,7 @@ thread pool. No CPU-affinity pinning was applied (single-threaded workloads do n
 Each run creates **N independent neural fields** (N ∈ {5, 10, 50, 100}), tiled copies of one
 **canonical DFT regime**, and times the integration loop. The matrix is fully crossed:
 
-**6 variants × 4 regimes × 2 field sizes × 4 N × 10 runs.**
+**6 variants × 4 regimes × 2 field sizes × 4 N × 5 runs.**
 
 | Axis | Values |
 |---|---|
@@ -42,7 +42,7 @@ Each run creates **N independent neural fields** (N ∈ {5, 10, 50, 100}), tiled
 | Canonical regimes | detection · selection · memory · multi-peak |
 | Field size (1D) | 100, 500 cells |
 | N (independent fields) | 5, 10, 50, 100 |
-| Runs per cell | 10 (warm-up: 200 steps, discarded; timed: 5 000 steps) |
+| Runs per cell | 5 (warm-up: 200 steps, discarded; timed: 2 000 steps) |
 
 **Canonical regimes** reuse the representative parameters of the cross-platform-validation suite:
 
@@ -65,15 +65,20 @@ field sizes; only stimulus/kernel *positions* scale with field size so each regi
 on a larger grid.
 
 **Timing protocol:** only the step loop is timed (build, `init`, file I/O excluded). Reported value is
-the **median of 10 runs**, with a **95% confidence interval on the mean** (t-interval) in
+the **median of 5 runs**, with a **95% confidence interval on the mean** (t-interval) in
 `data/benchmark_summary.csv` and drawn as the ribbon / error bars in the figures.
 
-See [`THREATS_TO_VALIDITY.md`](THREATS_TO_VALIDITY.md) for the full set of trade-off caveats
+See [`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) for the full set of trade-off caveats
 (precision, convolution method, single-machine, etc.).
 
 ---
 
 ## Results
+
+> ⚠️ **Numbers and figures below are pending re-measurement.** They were produced under the earlier
+> 5000-step / 10-run protocol on a previous machine. All suites are being re-run at **2000 steps /
+> 5 runs on a single faster machine** (1D + 2D together, for cross-suite comparability); the tables
+> and figures will be refreshed from that data. Treat the current values as provisional.
 
 ![Throughput](fig_benchmark_throughput.png)
 

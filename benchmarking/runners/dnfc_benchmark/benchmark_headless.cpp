@@ -27,8 +27,8 @@ static constexpr int    BASE_SIZE    = 100;   // reference grid the arch positio
 static constexpr double TAU          = 25.0;
 static constexpr double NOISE_AMP    = 0.1;    // benchmark uses A>0 so the RNG cost is measured
 static constexpr int    WARMUP_STEPS = 200;
-static constexpr int    TIMED_STEPS  = 5000;
-static constexpr int    N_RUNS       = 10;
+static constexpr int    TIMED_STEPS  = 2000;
+static constexpr int    N_RUNS       = 5;
 
 // ── Architecture definitions ────────────────────────────────────────────────
 // The four benchmark architectures reuse the representative sim of each band in
