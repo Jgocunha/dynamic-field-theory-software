@@ -22,8 +22,8 @@ DATA_DIR    = fullfile(SCRIPT_DIR, '..', 'data');
 OUTPUT_FILE = fullfile(DATA_DIR, 'timings-cosivina-2d.csv');
 
 WARMUP_STEPS = 200;
-TIMED_STEPS  = 5000;
-N_RUNS       = 10;
+TIMED_STEPS  = 2000;
+N_RUNS       = 5;
 NOISE_AMP    = 0.1;    % benchmark uses A>0 so the RNG cost is measured
 BASE_GRID    = 50;     % reference grid side the arch positions are defined on
 

@@ -40,8 +40,8 @@ static constexpr int    BASE_GRID    = 50;    // reference grid side the arch po
 static constexpr double TAU          = 25.0;
 static constexpr double NOISE_AMP    = 0.1;    // benchmark uses A>0 so the RNG cost is measured
 static constexpr int    WARMUP_STEPS = 200;
-static constexpr int    TIMED_STEPS  = 5000;
-static constexpr int    N_RUNS       = 10;
+static constexpr int    TIMED_STEPS  = 2000;
+static constexpr int    N_RUNS       = 5;
 
 // ── Architecture definitions (2D) ───────────────────────────────────────────
 // Reuse the representative validation sim of each band (detection 001, selection
