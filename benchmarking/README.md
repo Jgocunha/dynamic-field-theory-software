@@ -1,126 +1,172 @@
-# DFT Framework Benchmark Report
+# DFT Framework Benchmark Report (1D)
+
+Throughput (steps/second) of **N independent 1D neural fields** across six framework
+variants, swept over four canonical DFT regimes and two field sizes. The 2D
+counterpart lives in [`../benchmarking-2d/`](../benchmarking-2d/).
 
 ## Test Machine
 
 | Property | Value |
 |---|---|
-| CPU | AMD Ryzen 5 3600 (6 cores / 12 threads, 3.6 GHz base) |
-| RAM | 32 GB DDR4 |
-| OS | Windows 11 Pro (build 10.0.22621), 64-bit |
-| Compiler (Cedar / dnfc) | MSVC 19.44 (Visual Studio 2022 Community) |
-| MATLAB version | R2023a |
-| Python version | 3.11 |
-| dnfc version | 2.4.1 |
-| Cedar version | 6.1.0 |
-| Cosivina version | 1.4.0 |
-| cosivina-python version | 0.1.0 (nonumba path for validation; numba path for benchmarks) |
+| CPU | 13th Gen Intel Core i9-13900 (24 cores / 32 threads, up to 5.6 GHz boost) |
+| RAM | 32 GB |
+| OS | Windows 11 Pro (build 10.0.26200), 64-bit |
+| Power plan | High performance (no CPU down-throttling during runs) |
+| Compiler (Cedar / dnfc) | MSVC 19.44 (Visual Studio 2022 Community), C++20 |
+| Release flags | `/O2 /Ob2 /DNDEBUG` (CMake Release); dnfc additionally built with `/arch:AVX2` |
+| MATLAB version | R2024b, `maxNumCompThreads(1)` |
+| Python version | 3.11.9; numpy 2.2.1; numba 0.66.0 |
+| dnfc version | 2.9.3 (cache-blocked separable convolution, AVX2 SIMD sigmoid, ILP-unrolled convolution, fused state-metrics) |
+| Cedar version | 6.2.0 — **both** convolution engines benchmarked: OpenCV (spatial) and FFTW (spectral); `cv::setNumThreads(0)` |
+| Cosivina version | 1.4.0 (MATLAB) |
+| cosivina-python version | 0.1.0 (numba JIT and pure-NumPy paths both benchmarked) |
 
-All benchmarks ran single-threaded. No process pinning was applied.
+**Single-threading is enforced, not assumed.** Each runner pins its math-library thread pools to 1
+before timing: Python sets `OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=NUMBA_NUM_THREADS=1`
+(before numpy import); MATLAB calls `maxNumCompThreads(1)`; the Cedar runner calls
+`cv::setNumThreads(0)` to disable OpenCV's internal threading; dnfc's loop is plain scalar C++ with no
+thread pool. No CPU-affinity pinning was applied (single-threaded workloads do not require it).
 
 ---
 
 ## Benchmark Design
 
-Each benchmark creates **N independent neural fields** (N ∈ {10, 50, 100, 500, 1000}).
-Every field consists of four elements:
+Each run creates **N independent neural fields** (N ∈ {5, 10, 50, 100}), tiled copies of one
+**canonical DFT regime**, and times the integration loop. The matrix is fully crossed:
 
-| Element | Parameters |
+**6 variants × 4 regimes × 2 field sizes × 4 N × 5 runs.**
+
+| Axis | Values |
 |---|---|
-| GaussStimulus | width=5, amplitude=10, circular=true |
-| NeuralField | fieldSize=100, τ=25 ms, h=−5, sigmoid (x_shift=0, steepness=100) |
-| GaussKernel (lateral) | width=3, amplitude=5, global=0, circular=true, normalized=true |
-| NormalNoise | amplitude=0 (element present; inert) |
+| Framework variants | dnfc · Cedar (OpenCV) · Cedar (FFTW) · Cosivina (MATLAB) · cosivina-python (numba) · cosivina-python (NumPy) |
+| Canonical regimes | detection · selection · memory · multi-peak |
+| Field size (1D) | 100, 500 cells |
+| N (independent fields) | 5, 10, 50, 100 |
+| Runs per cell | 5 (warm-up: 200 steps, discarded; timed: 2 000 steps) |
 
-Total elements: 4N. Fields are independent (no cross-field connections).
+**Canonical regimes** reuse the representative parameters of the cross-platform-validation suite:
 
-**Timing protocol:**
-- 200 warm-up steps (discarded)
-- 3 timed runs of 5 000 steps each
-- Metric: steps per second (wall-clock via `std::chrono` or MATLAB `tic/toc`)
-- Reported value: median of 3 runs
+| Regime | h | Lateral kernel | Stimuli |
+|---|---|---|---|
+| detection | −8 | Gauss (σ=3, a=8) | 1 |
+| selection | −10 | Gauss (σ=3, a=5) + global inhibition −0.15 | 2 |
+| memory | −5 | Mexican-hat (σ_exc=3.4 a=17.7, σ_inh=8.9 a=13.5) | 1 |
+| multi-peak | −8 | Gauss (σ=2, a=5) | 2 |
 
-**Precision:** Cedar uses float32; Cosivina and dnfc use float64.
+**Noise is on:** every field includes a `NormalNoise` term with **amplitude A = 0.1**, so per-step
+RNG cost is part of the measured workload.
+
+**Kernel cutoff is unified across all six frameworks by real tap count, not by a shared nominal
+parameter.** dnfc and cosivina/cosivina-python use `cutoffFactor=5` — a kernel-*radius* multiplier
+(taps = 2·min(⌈5σ⌉, field-size cap)+1). Cedar's `limit` is a kernel-*width* multiplier
+(taps = ⌈limit·σ⌉, rounded to odd) — a different unit, so naively setting `limit=5` gives Cedar
+roughly **half** the real convolution work of the other frameworks (this was an actual bug in an
+earlier protocol revision, not a deliberate choice). Cedar's `limit` is instead computed per σ and
+field size (`fairCedarLimit`) to reproduce the *exact same tap count* dnfc uses, so every framework
+convolves the same real kernel support.
+
+**Activation function is matched for the *selection* regime.** dnfc/cosivina/cosivina-python use a
+logistic sigmoid; Cedar is configured with `cedar.aux.math.ExpSigmoid`, algebraically identical
+(`1/(1+exp(-β(x-θ)))`) to the others' sigmoid — verified by source comparison, not assumed. An
+earlier protocol revision used Cedar's `AbsSigmoid` here, which never reached winner-take-all.
+
+**The *memory* regime uses a two-phase protocol** in every framework: the stimulus is applied for
+100 steps to establish the bump, then removed before the timed 2 000-step window begins. This
+measures genuine self-sustained memory maintenance, not stimulus-driven integration.
+
+**Position scaling:** kernel σ values are absolute (a fixed interaction range), held constant across
+field sizes; only stimulus/kernel *positions* scale with field size so each regime is the same model
+on a larger grid.
+
+**Timing protocol:** only the step loop is timed (build, `init`, file I/O excluded). Reported value is
+the **median of 5 runs**, with a **95% confidence interval on the mean** (t-interval) in
+`data/benchmark_summary.csv` and drawn as the ribbon / error bars in the figures.
+
+See [`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) for the full set of trade-off caveats
+(precision, convolution method, single-machine, etc.).
 
 ---
 
 ## Results
 
+Measured at the fair protocol described above: matched kernel tap count, matched activation
+function, two-phase memory. All six variants, all four regimes, both field sizes.
+
 ![Throughput](fig_benchmark_throughput.png)
 
 ![Speedup](fig_benchmark_speedup.png)
 
-### Table 1 — Steps per second (median of 3 runs)
+### Table 1 — Median steps/second at N=100 (5 runs)
 
-| Framework | N=10 | N=50 | N=100 | N=500 | N=1000 |
-|---|---:|---:|---:|---:|---:|
-| Cedar | 5 798 | 1 240 | 616 | 118 | 61 |
-| Cosivina | 2 443 | 496 | 244 | 46 | 22 |
-| cosivina-python | 2 091 | 426 | 209 | 42 | 20 |
-| dnfc | 8 190 | 1 601 | 794 | 142 | 70 |
+Columns are *regime @ field size*. Higher is faster. See `data/benchmark_summary.csv` for per-cell
+mean, SD, and 95% CI.
 
-### Table 2 — Detailed: median [min – max] steps/second
+| Framework (variant) | det@100 | det@500 | sel@100 | sel@500 | mem@100 | mem@500 | mp@100 | mp@500 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **dnfc** (C++, float64) | 7 989 | 1 776 | 7 466 | 1 718 | 6 601 | 1 533 | 8 252 | 1 765 |
+| cosivina-python (numba) | 1 597 | 459 | 1 429 | 459 | 1 330 | 384 | 1 580 | 487 |
+| Cedar (FFTW, float32) | 961 | 470 | 942 | 466 | 1 102 | 659 | 992 | 469 |
+| cosivina-python (NumPy) | 511 | 289 | 431 | 257 | 450 | 294 | 491 | 307 |
+| Cedar (OpenCV, float32) | 543 | 199 | 521 | 197 | 195 | 71 | 657 | 241 |
+| Cosivina (MATLAB) | 251 | 171 | 214 | 149 | 170 | 105 | 218 | 156 |
 
-| Framework | N=10 | N=50 | N=100 | N=500 | N=1000 |
-|---|---|---|---|---|---|
-| Cedar | 5798 [5439–5841] | 1240 [1213–1304] | 616 [616–632] | 118 [117–120] | 61 [60–62] |
-| Cosivina | 2443 [2300–2483] | 496 [495–497] | 244 [242–245] | 46 [45–46] | 22 [22–22] |
-| cosivina-python | 2091 [2081–2134] | 426 [425–430] | 209 [209–213] | 42 [42–42] | 20 [20–21] |
-| dnfc | 8190 [7726–8264] | 1601 [1587–1630] | 794 [757–811] | 142 [133–147] | 70 [69–70] |
+### Table 2 — Speedup relative to Cosivina (MATLAB), averaged across regimes at N=100
+
+| Framework (variant) | field=100 | field=500 |
+|---|---:|---:|
+| dnfc | 35.9× (32–39×) | 12.0× (10–15×) |
+| cosivina-python (numba) | 7.0× (6.4–7.8×) | 3.1× (2.7–3.7×) |
+| Cedar (FFTW) | 4.8× (3.8–6.5×) | 3.8× (2.8–6.3×) |
+| cosivina-python (NumPy) | 2.2× (2.0–2.7×) | 2.1× (1.7–2.8×) |
+| Cedar (OpenCV) | 2.2× (1.2–3.0×) | 1.2× (0.7–1.6×) |
+| Cosivina (MATLAB) | 1.0× | 1.0× |
 
 ---
 
-## Statistical Summary
+## Key observations
 
-### Run-to-run variability
+- **dnfc is the fastest by a wide margin** in every regime and at both field sizes — 32–39× Cosivina
+  at field=100, 10–15× at field=500. The lead is structural: compiled native C++ with a vectorized
+  Euler loop and direct spatial convolution.
 
-All frameworks show low variability (SD < 5% of median) across the 3 runs,
-confirming stable, reproducible measurements.
+- **Second place is cosivina-python (numba)** at both field sizes under the fair protocol (unlike an
+  earlier, unfair measurement where second place flipped with field size) — its JIT-compiled host
+  code plus FFT-based convolution holds up well as the field grows.
 
-| Framework | N | Median (sps) | Min | Max | SD |
-|---|---|---:|---:|---:|---:|
-| cedar | 10 | 5798 | 5439 | 5841 | 219 |
-| cedar | 50 | 1240 | 1213 | 1304 | 47 |
-| cedar | 100 | 616 | 616 | 632 | 9 |
-| cedar | 500 | 118 | 117 | 120 | 2 |
-| cedar | 1000 | 61 | 60 | 62 | 1 |
-| cosivina | 10 | 2443 | 2300 | 2483 | 101 |
-| cosivina | 50 | 496 | 495 | 497 | 1 |
-| cosivina | 100 | 244 | 242 | 245 | 2 |
-| cosivina | 500 | 46 | 45 | 46 | 1 |
-| cosivina | 1000 | 22 | 22 | 22 | 0.2 |
-| cosivina-python | 10 | 2091 | 2081 | 2134 | 27 |
-| cosivina-python | 50 | 426 | 425 | 430 | 3 |
-| cosivina-python | 100 | 209 | 209 | 213 | 2 |
-| cosivina-python | 500 | 42 | 42 | 42 | 0 |
-| cosivina-python | 1000 | 20 | 20 | 21 | 0.7 |
-| dnfc | 10 | 8190 | 7726 | 8264 | 283 |
-| dnfc | 50 | 1601 | 1587 | 1630 | 22 |
-| dnfc | 100 | 794 | 757 | 811 | 28 |
-| dnfc | 500 | 142 | 133 | 147 | 7 |
-| dnfc | 1000 | 70 | 69 | 70 | 0.4 |
+- **Cedar-FFTW vs Cedar-OpenCV** (a clean *same-precision, same-framework* comparison): FFTW wins on
+  the convolution-heavy **memory** (Mexican-hat) regime at both field sizes (e.g. memory@500: 659 vs
+  71 sps) — its fused Fourier-domain multiply avoids the second spatial convolution OpenCV pays for.
+  OpenCV is closer on the narrow-kernel regimes.
 
-### Speedup ratios (headless, relative to Cosivina)
+- **This result reverses an earlier, unfair measurement.** A prior protocol revision set Cedar's
+  kernel `limit=5` believing it was directly comparable to dnfc's `cutoffFactor=5` — it isn't (see
+  *Benchmark Design* above), so Cedar was doing roughly half the real convolution work dnfc was.
+  Once corrected, no new dnfc optimization work was needed for dnfc to win: the fixed comparison
+  reveals dnfc's existing lead rather than creating one.
 
-| N | dnfc / Cosivina | Cedar / Cosivina | dnfc / Cedar | cosivina-python / Cosivina |
-|---|---:|---:|---:|---:|
-| 10 | 3.35× | 2.37× | 1.41× | 0.86× |
-| 50 | 3.23× | 2.50× | 1.29× | 0.86× |
-| 100 | 3.25× | 2.53× | 1.29× | 0.86× |
-| 500 | 3.12× | 2.60× | 1.20× | 0.92× |
-| 1000 | 3.13× | 2.73× | 1.15× | 0.92× |
+> **Precision caveat:** Cedar runs **float32**, all others **float64**. Throughput is per step, not
+> per FLOP; Cedar's float32 SIMD-width advantage flatters its raw step rate. See
+> [`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) for this and all other trade-off caveats
+> (convolution method, single-machine measurement, multi-session environmental control, and the
+> correct scope of "faster" claims here).
 
-### Scaling efficiency (steps/s relative to N=10 baseline; 1.0 = perfectly linear)
+---
 
-| Framework | N=10 | N=50 | N=100 | N=500 | N=1000 |
-|---|---:|---:|---:|---:|---:|
-| cedar | 1.000 | 1.070 | 1.063 | 1.022 | 1.047 |
-| cosivina | 1.000 | 1.016 | 0.999 | 0.934 | 0.910 |
-| cosivina-python | 1.000 | 1.019 | 1.002 | 1.004 | 0.977 |
-| dnfc | 1.000 | 0.978 | 0.969 | 0.870 | 0.851 |
+## Data provenance
 
-Key observations:
-- **dnfc is consistently the fastest** across all tested configurations.
-- **dnfc is ~3.1–3.4× faster than Cosivina** across all N values — a stable ratio that indicates the advantage is structural (compiled native C++ vs MATLAB interpreter overhead), not tied to a specific working-set size.
-- **Cedar is ~2.4–2.7× faster than Cosivina**. Cedar's runner uses float32 arithmetic (vs float64 in Cosivina and dnfc), which contributes to its advantage over Cosivina but limits it compared to dnfc (which uses float64 yet is still faster).
-- **dnfc is ~1.2–1.4× faster than Cedar**. This gap narrows slightly at higher N, suggesting that at large element counts memory bandwidth (shared between float32 and float64 vectors of the same element count) becomes the dominant cost.
-- **cosivina-python is ~86–92% as fast as Cosivina (MATLAB)**. The gap is small because both implementations ultimately call into BLAS-backed array routines (NumPy vs MATLAB) for the convolution. Python object-dispatch overhead per `sim.step()` call accounts for the remaining difference. cosivina-python also shows near-perfect scaling efficiency (closest to 1.0 at all N), meaning its per-step cost is almost purely the convolution with minimal fixed overhead.
+All six variants were measured on one machine (see *Test Machine* above); see
+[`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) §4 for the measurement's session structure and
+what that does and doesn't bound. Each `data/timings-*.csv` row is
+`framework,variant,arch,field_size,mode,N,run,steps_per_second` (8 columns). Regenerate all tables
+and figures with `Rscript analysis.R` and `Rscript fig_benchmark.R`.
+
+| Data file | Variants | Rows |
+|---|---|---:|
+| `data/timings-dnfc.csv` | dnfc | 160 |
+| `data/timings-cedar.csv` | OpenCV + FFTW | 320 |
+| `data/timings-cosivina-python.csv` | numba + NumPy | 320 |
+| `data/timings-cosivina.csv` | Cosivina (MATLAB) | 280 † |
+
+† `detection`/`selection`/`multi-peak` carry 10 legacy runs/cell from a pre-2000-step/5-run
+protocol revision (not yet trimmed); `memory` was freshly re-measured at 5 runs/cell under the
+current protocol. `analysis.R`'s per-cell run count reflects this per architecture.

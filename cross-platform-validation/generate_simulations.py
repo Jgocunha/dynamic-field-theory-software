@@ -184,10 +184,14 @@ assert len(SIMS) == 100, f"Expected 100 sims, got {len(SIMS)}"
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Per-variant simulation folders. cosivina-python (numba/nonumba) share one sims
+# folder — the .py files are identical, only the runner's import differs. Cedar
+# splits opencv/fftw because the convolution-engine string is baked into the JSON.
 COSIVINA_DIR        = ROOT / "simulations" / "cosivina"
 COSIVINA_PYTHON_DIR = ROOT / "simulations" / "cosivina-python"
 DNFC_DIR            = ROOT / "simulations" / "dnfc"
-CEDAR_DIR           = ROOT / "simulations" / "cedar"
+CEDAR_OPENCV_DIR    = ROOT / "simulations" / "cedar-opencv"
+CEDAR_FFTW_DIR      = ROOT / "simulations" / "cedar-fftw"
 
 
 def dnfc_act_fn(name: str) -> dict:
@@ -205,7 +209,30 @@ def cedar_sigmoid(name: str) -> dict:
         return {"type": "cedar.aux.math.AbsSigmoid", "threshold": "0", "beta": "100"}
     if name == "heaviside":
         return {"type": "cedar.aux.math.HeavisideSigmoid", "threshold": "0"}
+    if name == "sigmoid_b100":
+        return {"type": "cedar.aux.math.ExpSigmoid", "threshold": "0", "beta": "100"}
     raise ValueError(name)
+
+
+def fair_cedar_limit(sigma: float, field_size: int) -> float:
+    """Cedar's Gauss kernel taps = ceil(limit*sigma), bumped to the next odd number
+    (cedar::aux::kernel::Gauss::estimateWidth) — a kernel-WIDTH convention. dnfc's/
+    cosivina's cutoffFactor=5 is a kernel-RADIUS convention: taps = 2*min(ceil(5*sigma),
+    field-size cap)+1 (dnfc computeKernelRange). The two are NOT the same units —
+    Cedar's `limit` must be roughly 2x dnfc's cutoff to reach the same tap count.
+    Returns the Cedar limit that reproduces dnfc's exact tap count for this
+    sigma/field size, so validated architectures do the same convolution work."""
+    import math
+    ceil_sigma5 = math.ceil(5.0 * sigma)
+    half = (field_size - 1) / 2.0
+    cap_floor = math.floor(half)
+    cap_ceil = math.ceil(half)
+    range_lo = min(ceil_sigma5, cap_floor)
+    range_hi = min(ceil_sigma5, cap_ceil)
+    target_taps = range_lo + range_hi + 1
+    if target_taps % 2 == 0:
+        target_taps -= 1
+    return (target_taps - 0.5) / sigma
 
 
 # ---------------------------------------------------------------------------
@@ -405,8 +432,12 @@ CEDAR_BOILERPLATE_TAIL = """
 """
 
 
-def build_cedar_json_str(sim: dict, act_fn: str) -> str:
-    """Return a Cedar JSON string. Built as a string because Cedar uses duplicate keys."""
+def build_cedar_json_str(sim: dict, act_fn: str, engine: str = "cedar.aux.conv.OpenCV") -> str:
+    """Return a Cedar JSON string. Built as a string because Cedar uses duplicate keys.
+
+    `engine` selects the lateral-convolution backend: "cedar.aux.conv.OpenCV"
+    (spatial filter2D) or "cedar.aux.conv.FFTW" (Fourier-domain). Same architecture
+    either way; only the engine string differs."""
     k = sim["kernel"]
     n_stim = len(sim["stimuli"])
     sig_block = json.dumps(cedar_sigmoid(act_fn))
@@ -429,6 +460,7 @@ def build_cedar_json_str(sim: dict, act_fn: str) -> str:
 
     # Build lateral kernels block
     if k["type"] == "gauss":
+        limit = fair_cedar_limit(k["sigma"], 100)
         lateral_kernels = f"""{{
                 "cedar.aux.kernel.Gauss": {{
                     "dimensionality": "1",
@@ -437,11 +469,13 @@ def build_cedar_json_str(sim: dict, act_fn: str) -> str:
                     "sigmas": ["{k['sigma']}"],
                     "normalize": "true",
                     "shifts": ["0"],
-                    "limit": "10"
+                    "limit": "{limit}"
                 }}
             }}"""
     else:
         # Two Gauss entries (duplicate key — Cedar-specific)
+        limit_exc = fair_cedar_limit(k["sigma_exc"], 100)
+        limit_inh = fair_cedar_limit(k["sigma_inh"], 100)
         lateral_kernels = f"""{{
                 "cedar.aux.kernel.Gauss": {{
                     "dimensionality": "1",
@@ -450,7 +484,7 @@ def build_cedar_json_str(sim: dict, act_fn: str) -> str:
                     "sigmas": ["{k['sigma_exc']}"],
                     "normalize": "true",
                     "shifts": ["0"],
-                    "limit": "10"
+                    "limit": "{limit_exc}"
                 }},
                 "cedar.aux.kernel.Gauss": {{
                     "dimensionality": "1",
@@ -459,22 +493,26 @@ def build_cedar_json_str(sim: dict, act_fn: str) -> str:
                     "sigmas": ["{k['sigma_inh']}"],
                     "normalize": "true",
                     "shifts": ["0"],
-                    "limit": "10"
+                    "limit": "{limit_inh}"
                 }}
             }}"""
 
-    # Global inhibition (selection only; Cedar applies it to Σσ(u))
+    # Global inhibition (selection only). Cedar's eulerStep adds
+    # global_inhibition * sum(sigmoid(u)) to du, so the parameter must carry the
+    # (negative) sign of the inhibition directly — same convention as dnfc's amp_global.
     global_inh = "0"
     if k["type"] == "gauss" and k.get("amp_global", 0.0) != 0.0:
-        # Cedar's global inhibition parameter is positive; the inhibitory effect is subtracted
-        global_inh = str(abs(k["amp_global"]))
+        global_inh = str(k["amp_global"])
 
-    # Build connections (one per stimulus)
+    # Build connections (one per stimulus).
+    # Cedar slot name: GaussInput output = "Gauss input"; NeuralField input
+    # collection = "input". The lateral interaction is applied INTERNALLY by the
+    # field (it convolves its own sigmoided activation with the lateral kernel),
+    # so there is no explicit self-connection (Cedar rejects it as a deadlock).
     connections = []
     for i in range(n_stim):
         name = f"Gauss Input {i+1}" if n_stim > 1 else "Gauss Input"
-        connections.append(f'{{"source": "{name}.output", "target": "Neural Field.input"}}')
-    connections.append('{"source": "Neural Field.lateral output", "target": "Neural Field.input"}')
+        connections.append(f'{{"source": "{name}.Gauss input", "target": "Neural Field.input"}}')
     conn_str = ",\n        ".join(connections)
 
     return f"""{{
@@ -497,7 +535,7 @@ def build_cedar_json_str(sim: dict, act_fn: str) -> str:
             "global inhibition": "{global_inh}",
             "lateral kernels": {lateral_kernels},
             "lateral kernel convolution": {{
-                "engine": {{"type": "cedar.aux.conv.FFTW"}},
+                "engine": {{"type": "{engine}"}},
                 "borderType": "Cyclic",
                 "mode": "Same",
                 "alternate even kernel center": "false"
@@ -734,10 +772,16 @@ _COSIVINA_PYTHON_ROOT = Path(__file__).resolve().parents[4] / "cosivina_python"
 if str(_COSIVINA_PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(_COSIVINA_PYTHON_ROOT))
 
-from cosivina.nonumba import (
-    Simulator, GaussStimulus1D, SumInputs,
-    NeuralField, GaussKernel1D, LateralInteractions1D,
+# Variant selected by the runner via the COSIVINA_VARIANT env var ("numba" |
+# "nonumba"); defaults to nonumba. The two variants share this file.
+_variant = os.environ.get("COSIVINA_VARIANT", "nonumba")
+_mod = __import__(
+    "cosivina.numba" if _variant == "numba" else "cosivina.nonumba",
+    fromlist=["Simulator", "GaussStimulus1D", "SumInputs",
+              "NeuralField", "GaussKernel1D", "LateralInteractions1D"],
 )
+Simulator, GaussStimulus1D, SumInputs = _mod.Simulator, _mod.GaussStimulus1D, _mod.SumInputs
+NeuralField, GaussKernel1D, LateralInteractions1D = _mod.NeuralField, _mod.GaussKernel1D, _mod.LateralInteractions1D
 
 FIELD_SIZE = (1, 100)
 TAU        = 25.0
@@ -788,12 +832,14 @@ if __name__ == "__main__":
 
 def main():
     dnfc_act_fns  = ["abssigmoid_b100", "heaviside", "sigmoid_b100"]
-    cedar_act_fns = ["abssigmoid_b100", "heaviside"]
+    cedar_act_fns = ["abssigmoid_b100", "heaviside", "sigmoid_b100"]
 
     cosivina_out        = str(ROOT / "data" / "cosivina")
     cosivina_python_out = str(ROOT / "data" / "cosivina-python")
 
-    COSIVINA_PYTHON_DIR.mkdir(parents=True, exist_ok=True)
+    for d in (COSIVINA_DIR, COSIVINA_PYTHON_DIR, DNFC_DIR,
+              CEDAR_OPENCV_DIR, CEDAR_FFTW_DIR):
+        d.mkdir(parents=True, exist_ok=True)
 
     n_written = 0
 
@@ -819,18 +865,23 @@ def main():
             path.write_text(json.dumps(data, indent=4), encoding="utf-8")
             n_written += 1
 
-        # ── Cedar ───────────────────────────────────────────────────────────
+        # ── Cedar (two variants: OpenCV + FFTW engine) ──────────────────────
         for afn in cedar_act_fns:
-            cedar_str = build_cedar_json_str(sim, afn)
-            path = CEDAR_DIR / f"sim_{sid}_{afn}.json"
-            path.write_text(cedar_str, encoding="utf-8")
-            n_written += 1
+            for cedar_dir, engine in (
+                (CEDAR_OPENCV_DIR, "cedar.aux.conv.OpenCV"),
+                (CEDAR_FFTW_DIR,   "cedar.aux.conv.FFTW"),
+            ):
+                cedar_str = build_cedar_json_str(sim, afn, engine=engine)
+                path = cedar_dir / f"sim_{sid}_{afn}.json"
+                path.write_text(cedar_str, encoding="utf-8")
+                n_written += 1
 
     print(f"Written {n_written} simulation files.")
     print(f"  cosivina:        {len(SIMS)} .m files")
     print(f"  cosivina-python: {len(SIMS)} .py files")
     print(f"  dnfc:            {len(SIMS) * len(dnfc_act_fns)} .json files")
-    print(f"  cedar:           {len(SIMS) * len(cedar_act_fns)} .json files")
+    print(f"  cedar-opencv:    {len(SIMS) * len(cedar_act_fns)} .json files")
+    print(f"  cedar-fftw:      {len(SIMS) * len(cedar_act_fns)} .json files")
 
 
 if __name__ == "__main__":

@@ -1,150 +1,330 @@
 // cedar_benchmark — headless timing benchmark for Cedar DFT computation.
 //
-// Implements Cedar's float32 Euler integration directly (no Cedar library needed),
-// matching the same approach used in the cross-platform validation cedar_runner.
+// Drives the REAL Cedar library: builds an architecture of N independent neural
+// fields (each: 1 GaussInput + 1 NeuralField with a lateral Gauss kernel) by
+// generating a Cedar JSON and loading it with cedar::proc::Group::readJson,
+// then times stepping the LoopedTrigger. No field equations are reimplemented.
 //
-// Architecture: N independent neural fields, each with 1 Gaussian stimulus,
-// 1 Gaussian kernel (lateral), and 1 zero-amplitude noise element.
-// Total: 4N elements per benchmark configuration.
+// Architecture per field matches the cross-platform-validation single-field
+// detection setup; fields are independent (no cross-coupling).
 //
-// Usage: cedar_benchmark [output_csv]
-//   output_csv defaults to "timings.csv"
+// Build: registered via cedar_add_executable in the sibling CMakeLists.txt.
+//
+// Usage: benchmark [output_csv]
+//   output_csv defaults to "timings-cedar.csv"
+//
+// Output rows (no header): cedar,headless,<N>,<run>,<steps_per_second>
 
-#include <cmath>
-#include <cstdio>
-#include <cstring>
+#include "cedar/processing/Group.h"
+#include "cedar/processing/StepTime.h"
+#include "cedar/processing/Triggerable.h"
+#include "cedar/processing/sources/GaussInput.h"
+#include "cedar/dynamics/fields/NeuralField.h"
+#include "cedar/auxiliaries/GlobalClock.h"
+#include "cedar/units/Time.h"
+#include "cedar/units/prefixes.h"
+
+#include <QCoreApplication>
+#include <opencv2/core.hpp>
+
 #include <chrono>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
-#include <algorithm>
-#include <initializer_list>
 
-static constexpr int   FIELD_SIZE   = 100;
-static constexpr float TAU          = 25.0f;
-static constexpr float DT           = 25.0f;
-static constexpr float H            = -5.0f;
-static constexpr float BETA         = 100.0f;
-static constexpr float K_SIGMA      = 3.0f;
-static constexpr float K_AMP        = 5.0f;
-static constexpr float K_LIMIT      = 10.0f;   // Cedar kernel limit factor
-static constexpr float S_SIGMA      = 5.0f;
-static constexpr float S_AMP        = 10.0f;
-static constexpr int   WARMUP_STEPS = 200;
-static constexpr int   TIMED_STEPS  = 5000;
-static constexpr int   N_RUNS       = 3;
+namespace fs = std::filesystem;
 
-// AbsSigmoid matching Cedar's cedar.aux.math.AbsSigmoid (beta=100, threshold=0)
-static inline float abs_sigmoid(float x)
+// Protocol / field constants (match the 1D benchmark spec).
+static constexpr int    BASE_SIZE    = 100;    // reference grid the arch positions are defined on
+static constexpr double TAU          = 25.0;
+static constexpr double BETA         = 100.0;
+static constexpr double NOISE_GAIN   = 0.1;    // benchmark uses A>0 so the RNG cost is measured
+static constexpr int    WARMUP_STEPS = 200;
+static constexpr int    TIMED_STEPS  = 2000;
+static constexpr int    N_RUNS       = 5;
+
+static const cedar::unit::Time STEP_TIME(25.0 * cedar::unit::milli * cedar::unit::second);
+
+// ---------------------------------------------------------------------------
+// Architecture definitions — reuse the representative validation sim of each band
+// (detection 001, selection 021, memory 041, multi-peak 081). Matches the dnfc
+// benchmark runner's Arch set and the cross-platform-validation Cedar JSON
+// generator (build_cedar_json_str in generate_simulations.py).
+// ---------------------------------------------------------------------------
+
+enum class KernelType { Gauss, MexicanHat };
+
+struct Stim { double amp, sigma, pos; };
+
+struct Arch {
+    std::string name;
+    double      h;
+    KernelType  kernel;
+    double      kSigma, kAmp, kGlobal;            // Gauss kernel
+    double      kSigmaExc, kAmpExc, kSigmaInh, kAmpInh;  // Mexican-hat
+    std::vector<Stim> stimuli;
+};
+
+static const Arch& get_arch(const std::string& name)
 {
-    float bx = BETA * x;
-    return 0.5f * (1.0f + bx / (1.0f + std::abs(bx)));
-}
-
-// Build a normalised Gaussian kernel with Cedar's limit convention.
-// half_width = round_odd( limit * sigma ) where round_odd rounds to odd integer.
-static std::vector<float> make_gauss_kernel(float sigma, float amplitude)
-{
-    int half_w = static_cast<int>(std::round(K_LIMIT * sigma));
-    int ksize  = 2 * half_w + 1;
-    std::vector<float> k(ksize);
-    float sum = 0.0f;
-    for (int i = 0; i < ksize; ++i) {
-        float x = static_cast<float>(i - half_w);
-        k[i] = std::exp(-x * x / (2.0f * sigma * sigma));
-        sum += k[i];
-    }
-    for (auto& v : k) v *= (amplitude / sum);
-    return k;
-}
-
-// Circular convolution of sigmoid(u) with kernel k → out.
-static void convolve(const std::vector<float>& u,
-                     const std::vector<float>& k,
-                     std::vector<float>& out)
-{
-    int half = static_cast<int>(k.size()) / 2;
-    for (int i = 0; i < FIELD_SIZE; ++i) {
-        float s = 0.0f;
-        for (int j = 0; j < static_cast<int>(k.size()); ++j) {
-            int idx = ((i - half + j) % FIELD_SIZE + FIELD_SIZE) % FIELD_SIZE;
-            s += k[j] * abs_sigmoid(u[idx]);
-        }
-        out[i] = s;
-    }
-}
-
-// Circular Gaussian stimulus (not normalised, matching Cedar's default).
-static std::vector<float> make_gauss_stimulus(int center, float sigma, float amplitude)
-{
-    std::vector<float> s(FIELD_SIZE);
-    for (int i = 0; i < FIELD_SIZE; ++i) {
-        float x = static_cast<float>(i - center);
-        if (x >  FIELD_SIZE / 2.0f) x -= FIELD_SIZE;
-        if (x < -FIELD_SIZE / 2.0f) x += FIELD_SIZE;
-        s[i] = amplitude * std::exp(-x * x / (2.0f * sigma * sigma));
-    }
-    return s;
-}
-
-static void run_benchmark(int N, const std::string& outfile)
-{
-    // Pre-build shared kernel (same parameters for all fields)
-    auto kernel = make_gauss_kernel(K_SIGMA, K_AMP);
-
-    // Per-field state
-    std::vector<std::vector<float>> fields(N, std::vector<float>(FIELD_SIZE, H));
-    std::vector<std::vector<float>> stimuli(N);
-    std::vector<std::vector<float>> conv_buf(N, std::vector<float>(FIELD_SIZE, 0.0f));
-    // noise_buf stays zero (amplitude=0), present to count element overhead
-    std::vector<std::vector<float>> noise_buf(N, std::vector<float>(FIELD_SIZE, 0.0f));
-
-    for (int i = 0; i < N; ++i) {
-        int pos = static_cast<int>((2 * i + 1) * FIELD_SIZE / (2 * N));
-        stimuli[i] = make_gauss_stimulus(pos, S_SIGMA, S_AMP);
-    }
-
-    // One full Euler step for all N fields
-    auto step_all = [&]() {
-        for (int i = 0; i < N; ++i) {
-            convolve(fields[i], kernel, conv_buf[i]);
-            for (int x = 0; x < FIELD_SIZE; ++x) {
-                fields[i][x] += (DT / TAU) * (
-                    -fields[i][x] + H
-                    + conv_buf[i][x]
-                    + stimuli[i][x]
-                    + noise_buf[i][x]);  // noise = 0
-            }
-        }
+    static const std::vector<Arch> archs = {
+        {"detection",    -8.0,  KernelType::Gauss,      3.0, 8.0, 0.0,   0,0,0,0,
+            {{12.0, 5.0, 50.0}}},
+        {"selection",   -10.0,  KernelType::Gauss,      3.0, 5.0, -0.15, 0,0,0,0,
+            {{10.0, 5.0, 25.0}, {10.5, 5.0, 75.0}}},
+        {"memory",       -5.0,  KernelType::MexicanHat, 0,0,0,           3.4,17.7,8.9,13.5,
+            {{15.0, 5.0, 50.0}}},
+        {"multi-peak",   -8.0,  KernelType::Gauss,      2.0, 5.0, 0.0,   0,0,0,0,
+            {{12.0, 5.0, 25.0}, {12.0, 5.0, 75.0}}},
     };
+    for (const auto& a : archs)
+        if (a.name == name) return a;
+    std::fprintf(stderr, "Unknown arch '%s'; defaulting to detection\n", name.c_str());
+    return archs[0];
+}
+
+// ---------------------------------------------------------------------------
+// Architecture JSON generation (N independent fields)
+// ---------------------------------------------------------------------------
+
+// Cedar's Gauss kernel taps = ceil(limit*sigma), bumped to the next odd number
+// (cedar::aux::kernel::Gauss::estimateWidth) — a kernel-WIDTH convention. dnfc's/
+// cosivina's cutoffFactor=5 is a kernel-RADIUS convention: taps = 2*min(ceil(5*sigma),
+// field-size cap)+1 (dnfc computeKernelRange). The two are NOT the same units — Cedar's
+// `limit` must be roughly 2x dnfc's cutoff to reach the same tap count. This computes
+// the Cedar limit that reproduces dnfc's exact tap count for a given sigma/field size,
+// so the benchmarked/validated architectures do the same amount of convolution work.
+static double fairCedarLimit(double sigma, int fieldSize)
+{
+    const int ceilSigma5 = static_cast<int>(std::ceil(5.0 * sigma));
+    const double half = (fieldSize - 1) / 2.0;
+    const int capFloor = static_cast<int>(std::floor(half));
+    const int capCeil  = static_cast<int>(std::ceil(half));
+    const int rangeLo = std::min(ceilSigma5, capFloor);
+    const int rangeHi = std::min(ceilSigma5, capCeil);
+    int targetTaps = rangeLo + rangeHi + 1;
+    if (targetTaps % 2 == 0) targetTaps -= 1;
+    return (targetTaps - 0.5) / sigma;
+}
+
+// Emit the "lateral kernels" block for an architecture. Mexican-hat is two Gauss
+// entries (excitatory + negative inhibitory), matching the validation generator.
+static std::string lateral_kernels_block(const Arch& arch, int field_size)
+{
+    std::ostringstream k;
+    if (arch.kernel == KernelType::Gauss) {
+        const double limit = fairCedarLimit(arch.kSigma, field_size);
+        k << "{\"cedar.aux.kernel.Gauss\": {\n"
+             "                \"dimensionality\": \"1\", \"anchor\": [\"0\"], \"amplitude\": \"" << arch.kAmp << "\",\n"
+             "                \"sigmas\": [\"" << arch.kSigma << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"" << limit << "\"\n"
+             "            }}";
+    } else {
+        const double limitExc = fairCedarLimit(arch.kSigmaExc, field_size);
+        const double limitInh = fairCedarLimit(arch.kSigmaInh, field_size);
+        k << "{\n"
+             "                \"cedar.aux.kernel.Gauss\": {\n"
+             "                    \"dimensionality\": \"1\", \"anchor\": [\"0\"], \"amplitude\": \"" << arch.kAmpExc << "\",\n"
+             "                    \"sigmas\": [\"" << arch.kSigmaExc << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"" << limitExc << "\"\n"
+             "                },\n"
+             "                \"cedar.aux.kernel.Gauss\": {\n"
+             "                    \"dimensionality\": \"1\", \"anchor\": [\"0\"], \"amplitude\": \"-" << arch.kAmpInh << "\",\n"
+             "                    \"sigmas\": [\"" << arch.kSigmaInh << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"" << limitInh << "\"\n"
+             "                }\n"
+             "            }";
+    }
+    return k.str();
+}
+
+static std::string build_architecture_json(int n, const Arch& arch, const std::string& variant,
+                                           int field_size)
+{
+    const double pos_scale = static_cast<double>(field_size) / BASE_SIZE;
+    const std::string lateral = lateral_kernels_block(arch, field_size);
+    const std::string global_inh =
+        (arch.kernel == KernelType::Gauss && arch.kGlobal != 0.0)
+            ? std::to_string(arch.kGlobal) : "0";
+    // Convolution engine: OpenCV spatial filter2D (default) or FFTW Fourier-domain.
+    const std::string engine = (variant == "fftw") ? "cedar.aux.conv.FFTW"
+                                                    : "cedar.aux.conv.OpenCV";
+
+    std::ostringstream steps, conns;
+    bool first_step = true, first_conn = true;
+    for (int i = 0; i < n; ++i) {
+        const std::string nf = "Neural Field " + std::to_string(i);
+
+        // Stimuli for this field (1–3 GaussInput sources).
+        for (size_t s = 0; s < arch.stimuli.size(); ++s) {
+            const Stim& st = arch.stimuli[s];
+            const std::string gi =
+                "Gauss Input " + std::to_string(i) + "_" + std::to_string(s);
+            if (!first_step) steps << ",\n"; first_step = false;
+            steps <<
+              "        \"cedar.processing.sources.GaussInput\": {\n"
+              "            \"name\": \"" << gi << "\",\n"
+              "            \"dimensionality\": \"1\", \"sizes\": [\"" << field_size << "\"],\n"
+              "            \"amplitude\": \"" << st.amp << "\", \"centers\": [\"" << (st.pos * pos_scale) << "\"],\n"
+              "            \"sigma\": [\"" << st.sigma << "\"], \"cyclic\": \"true\", \"comments\": \"\"\n"
+              "        }";
+            if (!first_conn) conns << ",\n"; first_conn = false;
+            conns <<
+              "        {\"source\": \"" << gi << ".Gauss input\", \"target\": \"" << nf << ".input\"}";
+        }
+
+        if (!first_step) steps << ",\n"; first_step = false;
+        steps <<
+          "        \"cedar.dynamics.NeuralField\": {\n"
+          "            \"name\": \"" << nf << "\",\n"
+          "            \"dimensionality\": \"1\", \"sizes\": [\"" << field_size << "\"],\n"
+          "            \"time scale\": \"" << TAU << "\", \"resting level\": \"" << arch.h << "\",\n"
+          "            \"input noise gain\": \"" << NOISE_GAIN << "\",\n"
+          "            \"sigmoid\": {\"type\": \"cedar.aux.math.ExpSigmoid\", \"threshold\": \"0\", \"beta\": \"" << BETA << "\"},\n"
+          "            \"global inhibition\": \"" << global_inh << "\",\n"
+          "            \"lateral kernels\": " << lateral << ",\n"
+          "            \"lateral kernel convolution\": {\n"
+          "                \"engine\": {\"type\": \"" << engine << "\"},\n"
+          "                \"borderType\": \"Cyclic\", \"mode\": \"Same\", \"alternate even kernel center\": \"false\"\n"
+          "            },\n"
+          "            \"comments\": \"\"\n"
+          "        }";
+    }
+
+    std::ostringstream triggers;
+    triggers << "    \"triggers\": {\"cedar.processing.LoopedTrigger\": {\n"
+                "        \"name\": \"LoopedTrigger\", \"fake euler step\": \"false\",\n"
+                "        \"loop mode\": \"0\", \"step size\": \"1\", \"Steps\": {";
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) triggers << ", ";
+        triggers << "\"Neural Field " << i << "\": {}";
+    }
+    triggers << "}\n    }}";
+
+    std::ostringstream json;
+    json << "{\n    \"meta\": {\"format\": \"1\"},\n"
+         << "    \"steps\": {\n" << steps.str() << "\n    },\n"
+         << triggers.str() << ",\n"
+         << "    \"connections\": [\n" << conns.str() << "\n    ],\n"
+         << "    \"records\": {}, \"ui\": {}, \"ui view\": {}, \"ui generic\": {}\n}";
+    return json.str();
+}
+
+// ---------------------------------------------------------------------------
+// Benchmark one N value
+// ---------------------------------------------------------------------------
+
+static void run_benchmark(int n, const Arch& arch, const std::string& variant,
+                          int field_size, const std::string& outfile)
+{
+    // Write the architecture to a temp JSON and load it.
+    const fs::path tmp = fs::temp_directory_path() /
+        ("cedar_bench_" + arch.name + "_" + variant + "_fs" + std::to_string(field_size) +
+         "_N" + std::to_string(n) + ".json");
+    { std::ofstream f(tmp); f << build_architecture_json(n, arch, variant, field_size); }
+
+    cedar::proc::GroupPtr group(new cedar::proc::Group());
+    group->readJson(tmp.string());
+
+    // Collect the N fields and step them directly (a freshly loaded LoopedTrigger
+    // has no listeners; stepping it would be a no-op). Each step needs a strictly
+    // increasing global timestamp or Step::onTrigger skips compute().
+    std::vector<cedar::dyn::NeuralFieldPtr> fields;
+    std::vector<cedar::proc::sources::GaussInputPtr> stimuli;
+    for (const auto& name_element : group->getElements()) {
+        auto f = boost::dynamic_pointer_cast<cedar::dyn::NeuralField>(name_element.second);
+        if (f) fields.push_back(f);
+        auto gi = boost::dynamic_pointer_cast<cedar::proc::sources::GaussInput>(name_element.second);
+        if (gi) stimuli.push_back(gi);
+    }
+
+    auto clock = cedar::aux::GlobalClockSingleton::getInstance();
+    auto step_all = [&]() {
+        clock->addTime(STEP_TIME);
+        cedar::proc::ArgumentsPtr args(new cedar::proc::StepTime(STEP_TIME, clock->getTime()));
+        for (auto& f : fields) f->onTrigger(args, cedar::proc::TriggerPtr());
+    };
+
+    if (arch.name == "memory") {
+        // Establish the bump with the stimulus on for 100 steps, then remove it —
+        // the warmup + timed measurement below covers genuine self-sustained memory
+        // maintenance, not stimulus-driven activity.
+        for (int t = 0; t < 100; ++t) step_all();
+        for (auto& gi : stimuli) gi->setAmplitude(0.0);
+    }
 
     // Warm-up
     for (int t = 0; t < WARMUP_STEPS; ++t) step_all();
 
-    // Timed runs
-    FILE* fp = std::fopen(outfile.c_str(), "a");
+    // Guard: if any field entered an exception state during warm-up (e.g. the FFTW
+    // engine throwing "kernel size is too big for FFTW convolution" when the kernel
+    // is wider than the field), the steps did no real work and the resulting "sps"
+    // would be meaningless exception-handling throughput. Skip the cell entirely.
+    for (auto& f : fields) {
+        const auto st = f->getState();
+        if (st == cedar::proc::Triggerable::STATE_EXCEPTION ||
+            st == cedar::proc::Triggerable::STATE_EXCEPTION_ON_START) {
+            std::fprintf(stderr,
+                "SKIP cedar/%s %s fs=%d N=%d — field in exception state (kernel does not fit field?); no rows written\n",
+                variant.c_str(), arch.name.c_str(), field_size, n);
+            std::error_code ec; fs::remove(tmp, ec);
+            return;
+        }
+    }
+
+    std::FILE* fp = std::fopen(outfile.c_str(), "a");
     if (!fp) { std::fprintf(stderr, "Cannot open %s\n", outfile.c_str()); return; }
 
-    for (int run = 0; run < N_RUNS; ++run) {
-        // Reset fields to resting level
-        for (auto& f : fields) std::fill(f.begin(), f.end(), H);
-
+    for (int run = 1; run <= N_RUNS; ++run) {
         auto t0 = std::chrono::high_resolution_clock::now();
         for (int t = 0; t < TIMED_STEPS; ++t) step_all();
         auto t1 = std::chrono::high_resolution_clock::now();
 
-        double elapsed = std::chrono::duration<double>(t1 - t0).count();
-        double sps     = TIMED_STEPS / elapsed;
-        std::fprintf(fp,  "cedar,headless,%d,%d,%.2f\n", N, run + 1, sps);
-        std::printf("cedar headless  N=%3d  run=%d  %.1f steps/s\n", N, run + 1, sps);
+        const double elapsed = std::chrono::duration<double>(t1 - t0).count();
+        const double sps     = TIMED_STEPS / elapsed;
+        std::fprintf(fp,  "cedar,%s,%s,%d,headless,%d,%d,%.2f\n",
+                     variant.c_str(), arch.name.c_str(), field_size, n, run, sps);
+        std::printf("cedar/%-6s %-12s fs=%4d N=%4d run=%d  %.1f steps/s\n",
+                    variant.c_str(), arch.name.c_str(), field_size, n, run, sps);
     }
     std::fclose(fp);
+    std::error_code ec; fs::remove(tmp, ec);
 }
 
 int main(int argc, char* argv[])
 {
-    std::string outfile = (argc > 1) ? argv[1] : "timings-cedar.csv";
-    std::printf("Cedar headless benchmark → %s\n", outfile.c_str());
-    for (int N : {10, 50, 100, 500, 1000})
-        run_benchmark(N, outfile);
+    QCoreApplication app(argc, argv);
+    cv::setNumThreads(0);   // force single-threaded OpenCV convolution (fair single-thread timing)
+    cedar::aux::GlobalClockSingleton::getInstance()->start();
+
+    // Usage: benchmark [output_csv] [arch] [variant] [N_csv] [field_size]
+    //   variant:    opencv (default) | fftw  — selects the convolution engine
+    //   field_size: field length (default 100)
+    const std::string outfile  = (argc > 1) ? argv[1] : "timings-cedar.csv";
+    const std::string archName = (argc > 2) ? argv[2] : "detection";
+    const std::string variant  = (argc > 3) ? argv[3] : "opencv";
+    const Arch& arch = get_arch(archName);
+
+    std::vector<int> Ns;
+    if (argc > 4) {
+        std::string s = argv[4];
+        size_t pos = 0;
+        while (pos < s.size()) {
+            size_t comma = s.find(',', pos);
+            std::string tok = s.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+            if (!tok.empty()) Ns.push_back(std::stoi(tok));
+            if (comma == std::string::npos) break;
+            pos = comma + 1;
+        }
+    } else {
+        Ns = {5, 10, 50, 100};
+    }
+
+    const int field_size = (argc > 5) ? std::stoi(argv[5]) : BASE_SIZE;
+
+    std::printf("Cedar headless benchmark [arch=%s variant=%s fs=%d] (real API, cv threads=0) -> %s\n",
+                arch.name.c_str(), variant.c_str(), field_size, outfile.c_str());
+    for (int n : Ns)
+        run_benchmark(n, arch, variant, field_size, outfile);
     return 0;
 }

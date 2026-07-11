@@ -1,0 +1,79 @@
+{
+    "meta": {"format": "1"},
+    "steps": {
+        "cedar.processing.sources.GaussInput": {
+            "name": "Gauss Input",
+            "dimensionality": "1",
+            "sizes": ["100"],
+            "amplitude": "17.0",
+            "centers": ["50"],
+            "sigma": ["5"],
+            "cyclic": "true",
+            "comments": ""
+        },
+        "cedar.dynamics.NeuralField": {
+            "name": "Neural Field",
+            "activation as output": "false",
+            "discrete metric (workaround)": "false",
+            "update stepIcon according to output": "true",
+            "threshold for updating the stepIcon": "0.8",
+            "dimensionality": "1",
+            "sizes": ["100"],
+            "time scale": "25",
+            "resting level": "-5.5",
+            "input noise gain": "0",
+            "multiplicative noise (input)": "false",
+            "multiplicative noise (activation)": "false",
+            "sigmoid": {"type": "cedar.aux.math.AbsSigmoid", "threshold": "0", "beta": "100"},
+            "global inhibition": "0",
+            "lateral kernels": {
+                "cedar.aux.kernel.Gauss": {
+                    "dimensionality": "1",
+                    "anchor": ["0"],
+                    "amplitude": "20.0",
+                    "sigmas": ["3.4"],
+                    "normalize": "true",
+                    "shifts": ["0"],
+                    "limit": "10.147058823529411"
+                },
+                "cedar.aux.kernel.Gauss": {
+                    "dimensionality": "1",
+                    "anchor": ["0"],
+                    "amplitude": "-13.5",
+                    "sigmas": ["8.9"],
+                    "normalize": "true",
+                    "shifts": ["0"],
+                    "limit": "10.168539325842696"
+                }
+            },
+            "lateral kernel convolution": {
+                "engine": {"type": "cedar.aux.conv.OpenCV"},
+                "borderType": "Cyclic",
+                "mode": "Same",
+                "alternate even kernel center": "false"
+            },
+            "noise correlation kernel": {
+                "dimensionality": "1", "anchor": ["0"],
+                "amplitude": "0", "sigmas": ["3"],
+                "normalize": "true", "shifts": ["0"], "limit": "5"
+            },
+            "comments": ""
+        }
+    },
+    "triggers": {
+        "cedar.processing.LoopedTrigger": {
+            "name": "LoopedTrigger",
+            "fake euler step": "false",
+            "loop mode": "0",
+            "step size": "1",
+            "Steps": {"cedar.dynamics.NeuralField": {}}
+        }
+    },
+    "connections": [
+        {"source": "Gauss Input.Gauss input", "target": "Neural Field.input"}
+    ],
+    "records": {},
+    "ui": {},
+    "ui view": {},
+    "ui generic": {}
+}

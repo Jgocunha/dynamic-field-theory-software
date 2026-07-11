@@ -1,12 +1,15 @@
 # analysis.R — DFT Framework Benchmark Analysis
 #
-# Reads three separate CSV files (one per framework) and produces:
-#   - Table 1: steps/second for Cedar, Cosivina, dnfc × N={10,50,100,500,1000}
-#   - Detailed statistics (median / min / max)
-#   - Speedup ratios relative to Cosivina
+# Reads four per-framework CSV files and produces, per architecture:
+#   - steps/second for each framework VARIANT × N
+#   - 95% CI on the mean (t-interval over the 5 runs/cell)
+#   - speedup ratios relative to Cosivina (MATLAB)
+#
+# Variants compared: cosivina (MATLAB), cosivina-python (numba | nonumba),
+# cedar (opencv | fftw), dnfc. The framework+variant pair is the display key `fwv`.
 #
 # CSV format (no header, comma-separated):
-#   framework, mode, N, run, steps_per_second
+#   framework, variant, arch, field_size, mode, N, run, steps_per_second
 #
 # Run from the benchmarking/ root directory:
 #   Rscript analysis.R
@@ -28,16 +31,25 @@ if (is.null(ROOT) || ROOT == "") ROOT <- normalizePath(".")
 
 col_spec <- cols(
   framework        = col_character(),
+  variant          = col_character(),
+  arch             = col_character(),
+  field_size       = col_integer(),
   mode             = col_character(),
   N                = col_integer(),
   run              = col_integer(),
   steps_per_second = col_double()
 )
-col_nms <- c("framework", "mode", "N", "run", "steps_per_second")
+col_nms <- c("framework", "variant", "arch", "field_size", "mode", "N", "run", "steps_per_second")
+
+# framework+variant display label: bare framework when variant is "default",
+# else "framework (variant)" — e.g. "cedar (fftw)", "cosivina-python (nonumba)".
+make_fwv <- function(framework, variant) {
+  ifelse(variant == "default", framework, paste0(framework, " (", variant, ")"))
+}
 
 read_framework <- function(filename) {
   path <- file.path(ROOT, "data", filename)
-  if (!file.exists(path)) stop("File not found: ", path)
+  if (!file.exists(path)) { message("File not found (skipping): ", path); return(NULL) }
   read_csv(path, col_names = col_nms, col_types = col_spec)
 }
 
@@ -50,89 +62,79 @@ timings <- bind_rows(
 
 cat(sprintf("Loaded %d rows total\n\n", nrow(timings)))
 
+ARCH_ORDER <- c("detection", "selection", "memory", "multi-peak")
+
+timings <- timings %>% mutate(fwv = make_fwv(framework, variant))
+
 # ---------------------------------------------------------------------------
-# Aggregate
+# Aggregate (per framework-variant x arch x field_size x N)
 # ---------------------------------------------------------------------------
 summary_df <- timings %>%
-  group_by(framework, mode, N) %>%
+  group_by(framework, variant, fwv, arch, field_size, mode, N) %>%
   summarise(
     median_sps = median(steps_per_second),
+    mean_sps   = mean(steps_per_second),
     min_sps    = min(steps_per_second),
     max_sps    = max(steps_per_second),
     sd_sps     = sd(steps_per_second),
     n_runs     = n(),
+    sem_sps    = sd(steps_per_second) / sqrt(n()),
+    # 95% CI on the mean (t-interval; valid for the 5 runs collected per cell).
+    ci95_lo    = ifelse(n() > 1,
+                        mean(steps_per_second) - qt(0.975, n() - 1) * sd(steps_per_second) / sqrt(n()),
+                        NA_real_),
+    ci95_hi    = ifelse(n() > 1,
+                        mean(steps_per_second) + qt(0.975, n() - 1) * sd(steps_per_second) / sqrt(n()),
+                        NA_real_),
     .groups    = "drop"
   )
 
-# ---------------------------------------------------------------------------
-# Main results table (headless only)
-# ---------------------------------------------------------------------------
-headless_wide <- summary_df %>%
-  filter(mode == "headless") %>%
-  mutate(label = sprintf("%.0f", round(median_sps))) %>%
-  select(framework, N, label) %>%
-  pivot_wider(names_from = N, values_from = label, names_prefix = "N=") %>%
-  arrange(framework)
-
-cat("=== Headless steps/second (median of 3 runs) ===\n")
-print(as.data.frame(headless_wide))
-cat("\n")
+archs_present <- intersect(ARCH_ORDER, unique(summary_df$arch))
+sizes_present <- sort(unique(summary_df$field_size))
 
 # ---------------------------------------------------------------------------
-# Detailed statistics table
+# Per-architecture x field-size tables
 # ---------------------------------------------------------------------------
-detail <- summary_df %>%
-  filter(mode == "headless") %>%
-  mutate(stats = sprintf("%.0f  [%.0f–%.0f]", median_sps, min_sps, max_sps)) %>%
-  select(framework, N, stats) %>%
-  pivot_wider(names_from = N, values_from = stats, names_prefix = "N=") %>%
-  arrange(framework)
+for (a in archs_present) {
+  for (fs in sizes_present) {
+    sub <- summary_df %>% filter(mode == "headless", arch == a, field_size == fs)
+    if (nrow(sub) == 0) next
 
-cat("=== Detailed: median [min–max] steps/second ===\n")
-print(as.data.frame(detail))
-cat("\n")
+    cat(sprintf("============================================================\n"))
+    cat(sprintf("ARCHITECTURE: %s   field_size: %d\n", a, fs))
+    cat(sprintf("============================================================\n"))
 
-# ---------------------------------------------------------------------------
-# Speedup ratios relative to Cosivina
-# ---------------------------------------------------------------------------
-pivot_median <- summary_df %>%
-  filter(mode == "headless") %>%
-  select(framework, N, median_sps) %>%
-  pivot_wider(names_from = framework, values_from = median_sps)
+    wide <- sub %>%
+      mutate(label = sprintf("%.0f", round(median_sps))) %>%
+      select(fwv, N, label) %>%
+      pivot_wider(names_from = N, values_from = label, names_prefix = "N=") %>%
+      arrange(fwv)
+    cat("--- median steps/second (5 runs) ---\n")
+    print(as.data.frame(wide))
 
-speedup <- pivot_median %>%
-  mutate(
-    dnfc_vs_cosivina           = round(dnfc             / cosivina, 2),
-    cedar_vs_cosivina          = round(cedar            / cosivina, 2),
-    dnfc_vs_cedar              = round(dnfc             / cedar,    2),
-    `cosivina-python_vs_cosivina` = if ("cosivina-python" %in% names(.))
-                                      round(`cosivina-python` / cosivina, 2) else NA_real_
-  ) %>%
-  select(N, dnfc_vs_cosivina, cedar_vs_cosivina, dnfc_vs_cedar,
-         `cosivina-python_vs_cosivina`)
+    detail <- sub %>%
+      mutate(stats = sprintf("%.0f [%.0f-%.0f]", median_sps, min_sps, max_sps)) %>%
+      select(fwv, N, stats) %>%
+      pivot_wider(names_from = N, values_from = stats, names_prefix = "N=") %>%
+      arrange(fwv)
+    cat("--- median [min-max] ---\n")
+    print(as.data.frame(detail))
 
-cat("=== Speedup ratios (headless) ===\n")
-print(as.data.frame(speedup))
-cat("\n")
-
-# ---------------------------------------------------------------------------
-# Scaling efficiency (steps/s relative to N=10 baseline)
-# ---------------------------------------------------------------------------
-baseline <- summary_df %>%
-  filter(mode == "headless", N == 10) %>%
-  select(framework, base_sps = median_sps)
-
-scaling <- summary_df %>%
-  filter(mode == "headless") %>%
-  left_join(baseline, by = "framework") %>%
-  mutate(efficiency = round(median_sps / base_sps * (N / 10), 3)) %>%
-  select(framework, N, efficiency) %>%
-  pivot_wider(names_from = N, values_from = efficiency, names_prefix = "N=") %>%
-  arrange(framework)
-
-cat("=== Scaling efficiency (1.0 = perfectly linear) ===\n")
-print(as.data.frame(scaling))
-cat("\n")
+    # Speedup of every variant relative to Cosivina (MATLAB) at each N.
+    ref <- sub %>% filter(framework == "cosivina") %>% select(N, ref_sps = median_sps)
+    if (nrow(ref) > 0) {
+      sp <- sub %>%
+        inner_join(ref, by = "N") %>%
+        mutate(speedup = round(median_sps / ref_sps, 2)) %>%
+        select(fwv, N, speedup) %>%
+        pivot_wider(names_from = N, values_from = speedup, names_prefix = "N=") %>%
+        arrange(fwv)
+      cat("--- speedup vs Cosivina (MATLAB) ---\n")
+      print(as.data.frame(sp))
+    }
+    cat("\n")
+  }
+}
 
 # ---------------------------------------------------------------------------
 # Save outputs

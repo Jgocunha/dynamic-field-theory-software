@@ -93,19 +93,29 @@ df_cosivina <- load_framework("cosivina",
                               c("sigmoid_b100"),
                               apply_cedar_shift = FALSE)
 
-df_cosivina_python <- load_framework("cosivina-python",
-                                     c("sigmoid_b100"),
-                                     apply_cedar_shift = FALSE)
+# cosivina-python: two variants (numba JIT vs pure-NumPy). Same code path → expected
+# to agree to ~machine epsilon; numba is the canonical cpy for cross-framework pairs.
+df_cpy_numba   <- load_framework("cosivina-python-numba",
+                                 c("sigmoid_b100"), apply_cedar_shift = FALSE)
+df_cpy_nonumba <- load_framework("cosivina-python-nonumba",
+                                 c("sigmoid_b100"), apply_cedar_shift = FALSE)
 
 df_dnfc     <- load_framework("dnfc",
                               c("abssigmoid_b100", "heaviside", "sigmoid_b100"),
                               apply_cedar_shift = FALSE)
 
-df_cedar    <- load_framework("cedar",
-                              c("abssigmoid_b100", "heaviside"),
-                              apply_cedar_shift = TRUE)  # correct 0-based offset
+# Cedar: two convolution-engine variants (OpenCV spatial vs FFTW Fourier). Same math
+# → expected to agree to ~float32 epsilon on stable architectures; opencv is the
+# canonical cedar for cross-framework pairs.
+df_cedar_opencv <- load_framework("cedar-opencv",
+                                  c("abssigmoid_b100", "heaviside", "sigmoid_b100"),
+                                  apply_cedar_shift = TRUE)  # correct 0-based offset
+df_cedar_fftw   <- load_framework("cedar-fftw",
+                                  c("abssigmoid_b100", "heaviside", "sigmoid_b100"),
+                                  apply_cedar_shift = TRUE)
 
-all_loaded <- bind_rows(df_cosivina, df_cosivina_python, df_dnfc, df_cedar)
+all_loaded <- bind_rows(df_cosivina, df_cpy_numba, df_cpy_nonumba,
+                        df_dnfc, df_cedar_opencv, df_cedar_fftw)
 cat(sprintf("Loaded %d rows total.\n", nrow(all_loaded)))
 
 # ---------------------------------------------------------------------------
@@ -143,63 +153,52 @@ get_profiles <- function(df, fw, afn) {
 
 cat("Computing comparison pairs...\n")
 
+# All variants in one frame; pairing is driven by the families table below so a
+# missing variant (e.g. cosivina without MATLAB) just drops its pairs.
+all_frames <- all_loaded
+
+# Short label tokens used in pair keys (e.g. cedar_opencv_vs_dnfc_abssigmoid_b100).
+VAR_TOKEN <- c(
+  "cedar-opencv"             = "cedar_opencv",
+  "cedar-fftw"               = "cedar_fftw",
+  "cosivina"                 = "cosivina",
+  "cosivina-python-numba"    = "cpy_numba",
+  "cosivina-python-nonumba"  = "cpy_nonumba",
+  "dnfc"                     = "dnfc"
+)
+
+# Algebraic equivalence is only meaningful WITHIN the same activation-function
+# family (comparing different operators must differ by design). For each family,
+# emit every C(n,2) variant pair → 3 (AbsSig) + 3 (Heaviside) + 15 (Sigmoid) = 21.
+# Sigmoid now includes cedar-opencv/cedar-fftw too (fair kernel-parity + ExpSigmoid
+# fix let Cedar run the plain-logistic variant, giving a same-activation-function
+# comparison against Cedar that previously only existed for AbsSig/Heaviside).
+families <- list(
+  abssigmoid_b100 = c("cedar-opencv", "cedar-fftw", "dnfc"),
+  heaviside       = c("cedar-opencv", "cedar-fftw", "dnfc"),
+  sigmoid_b100    = c("cedar-opencv", "cedar-fftw", "cosivina", "cosivina-python-numba",
+                      "cosivina-python-nonumba", "dnfc")
+)
+
 pairs_list <- list()
-
-# 1. Cedar AbsSigmoid vs dnfc AbsSigmoid
-if (!is.null(df_cedar) && !is.null(df_dnfc)) {
-  pairs_list[["cedar_abs_vs_dnfc_abs"]] <- compute_pair_metrics(
-    get_profiles(df_cedar, "cedar", "abssigmoid_b100"),
-    get_profiles(df_dnfc,  "dnfc",  "abssigmoid_b100"),
-    "cedar_abs_vs_dnfc_abs"
-  )
-}
-
-# 2. Cedar Heaviside vs dnfc Heaviside
-if (!is.null(df_cedar) && !is.null(df_dnfc)) {
-  pairs_list[["cedar_hv_vs_dnfc_hv"]] <- compute_pair_metrics(
-    get_profiles(df_cedar, "cedar", "heaviside"),
-    get_profiles(df_dnfc,  "dnfc",  "heaviside"),
-    "cedar_hv_vs_dnfc_hv"
-  )
-}
-
-# 3. Cosivina sigmoid β=100 vs dnfc sigmoid β=100
-if (!is.null(df_cosivina) && !is.null(df_dnfc)) {
-  pairs_list[["cosivina_s100_vs_dnfc_s100"]] <- compute_pair_metrics(
-    get_profiles(df_cosivina, "cosivina", "sigmoid_b100"),
-    get_profiles(df_dnfc,     "dnfc",     "sigmoid_b100"),
-    "cosivina_s100_vs_dnfc_s100"
-  )
-}
-
-# 4. Cedar AbsSigmoid vs Cosivina sigmoid β=100
-if (!is.null(df_cedar) && !is.null(df_cosivina)) {
-  pairs_list[["cedar_abs_vs_cosivina_s100"]] <- compute_pair_metrics(
-    get_profiles(df_cedar,    "cedar",    "abssigmoid_b100"),
-    get_profiles(df_cosivina, "cosivina", "sigmoid_b100"),
-    "cedar_abs_vs_cosivina_s100"
-  )
-}
-
-# 5. cosivina-python sigmoid β=100 vs dnfc sigmoid β=100
-if (!is.null(df_cosivina_python) && !is.null(df_dnfc)) {
-  pairs_list[["cosivina_python_s100_vs_dnfc_s100"]] <- compute_pair_metrics(
-    get_profiles(df_cosivina_python, "cosivina-python", "sigmoid_b100"),
-    get_profiles(df_dnfc,            "dnfc",            "sigmoid_b100"),
-    "cosivina_python_s100_vs_dnfc_s100"
-  )
-}
-
-# 6. cosivina-python sigmoid β=100 vs cosivina (MATLAB) sigmoid β=100
-if (!is.null(df_cosivina_python) && !is.null(df_cosivina)) {
-  pairs_list[["cosivina_python_s100_vs_cosivina_s100"]] <- compute_pair_metrics(
-    get_profiles(df_cosivina_python, "cosivina-python", "sigmoid_b100"),
-    get_profiles(df_cosivina,        "cosivina",        "sigmoid_b100"),
-    "cosivina_python_s100_vs_cosivina_s100"
-  )
+for (afn in names(families)) {
+  variants <- families[[afn]]
+  combos <- combn(variants, 2, simplify = FALSE)
+  for (cmb in combos) {
+    fw_a <- cmb[1]; fw_b <- cmb[2]
+    prof_a <- get_profiles(all_frames, fw_a, afn)
+    prof_b <- get_profiles(all_frames, fw_b, afn)
+    if (nrow(prof_a) == 0 || nrow(prof_b) == 0) next  # variant absent → skip
+    lbl <- sprintf("%s_vs_%s_%s", VAR_TOKEN[fw_a], VAR_TOKEN[fw_b], afn)
+    pairs_list[[lbl]] <- compute_pair_metrics(prof_a, prof_b, lbl)
+  }
 }
 
 metrics <- bind_rows(pairs_list)
+
+# Classify each pair's numeric tier: any cedar variant (CV_32F core) → float32
+# ceiling; all-float64 pairs (cosivina / cosivina-python / dnfc) → float64.
+pair_is_float32 <- function(pair_label) grepl("cedar", pair_label)
 
 # ---------------------------------------------------------------------------
 # Save summary CSV
@@ -252,12 +251,30 @@ for (pr in unique(metrics$pair)) {
 # ---------------------------------------------------------------------------
 
 PAIR_LABELS <- c(
-  cedar_abs_vs_dnfc_abs                 = "Cedar AbsSig vs dnfc AbsSig",
-  cedar_hv_vs_dnfc_hv                   = "Cedar HV vs dnfc HV",
-  cosivina_s100_vs_dnfc_s100            = "Cosivina Sig vs dnfc Sig",
-  cedar_abs_vs_cosivina_s100            = "Cedar AbsSig vs Cosivina Sig",
-  cosivina_python_s100_vs_dnfc_s100     = "Cosivina-Python Sig vs dnfc Sig",
-  cosivina_python_s100_vs_cosivina_s100 = "Cosivina-Python Sig vs Cosivina Sig"
+  # AbsSigmoid family
+  cedar_opencv_vs_cedar_fftw_abssigmoid_b100 = "Cedar-OpenCV vs Cedar-FFTW (AbsSig)",
+  cedar_opencv_vs_dnfc_abssigmoid_b100       = "Cedar-OpenCV AbsSig vs dnfc AbsSig",
+  cedar_fftw_vs_dnfc_abssigmoid_b100         = "Cedar-FFTW AbsSig vs dnfc AbsSig",
+  # Heaviside family
+  cedar_opencv_vs_cedar_fftw_heaviside       = "Cedar-OpenCV vs Cedar-FFTW (HV)",
+  cedar_opencv_vs_dnfc_heaviside             = "Cedar-OpenCV HV vs dnfc HV",
+  cedar_fftw_vs_dnfc_heaviside               = "Cedar-FFTW HV vs dnfc HV",
+  # Sigmoid family
+  cedar_opencv_vs_cedar_fftw_sigmoid_b100    = "Cedar-OpenCV vs Cedar-FFTW (Sig)",
+  cedar_opencv_vs_cosivina_sigmoid_b100      = "Cedar-OpenCV Sig vs Cosivina Sig",
+  cedar_opencv_vs_cpy_numba_sigmoid_b100     = "Cedar-OpenCV Sig vs Cosivina-Python numba Sig",
+  cedar_opencv_vs_cpy_nonumba_sigmoid_b100   = "Cedar-OpenCV Sig vs Cosivina-Python nonumba Sig",
+  cedar_opencv_vs_dnfc_sigmoid_b100          = "Cedar-OpenCV Sig vs dnfc Sig",
+  cedar_fftw_vs_cosivina_sigmoid_b100        = "Cedar-FFTW Sig vs Cosivina Sig",
+  cedar_fftw_vs_cpy_numba_sigmoid_b100       = "Cedar-FFTW Sig vs Cosivina-Python numba Sig",
+  cedar_fftw_vs_cpy_nonumba_sigmoid_b100     = "Cedar-FFTW Sig vs Cosivina-Python nonumba Sig",
+  cedar_fftw_vs_dnfc_sigmoid_b100            = "Cedar-FFTW Sig vs dnfc Sig",
+  cosivina_vs_cpy_numba_sigmoid_b100         = "Cosivina vs Cosivina-Python numba (Sig)",
+  cosivina_vs_cpy_nonumba_sigmoid_b100       = "Cosivina vs Cosivina-Python nonumba (Sig)",
+  cosivina_vs_dnfc_sigmoid_b100              = "Cosivina Sig vs dnfc Sig",
+  cpy_numba_vs_cpy_nonumba_sigmoid_b100      = "Cosivina-Python numba vs nonumba (Sig)",
+  cpy_numba_vs_dnfc_sigmoid_b100             = "Cosivina-Python numba Sig vs dnfc Sig",
+  cpy_nonumba_vs_dnfc_sigmoid_b100           = "Cosivina-Python nonumba Sig vs dnfc Sig"
 )
 
 if (nrow(metrics) > 0) {
@@ -274,7 +291,7 @@ if (nrow(metrics) > 0) {
     labs(x = "Simulation type", y = expression(max*"|"*Delta*u*"|"),
          fill = "Phase",
          title = "Pointwise deviation between frameworks",
-         subtitle = "100 simulations × 5 types × 4 comparison pairs") +
+         subtitle = "100 simulations × 5 types × 12 same-activation comparison pairs") +
     theme_bw(base_size = 10) +
     theme(axis.text.x = element_text(angle = 35, hjust = 1),
           legend.position = "bottom")
@@ -307,13 +324,13 @@ for (tp in names(rep_sims)) {
   sid <- rep_sims[[tp]]
   for (ph in c("with_stimulus", "without_stimulus")) {
     for (row in list(
-      list(fw="cedar",            af="abssigmoid_b100", lbl="cedar / AbsSig"),
-      list(fw="cedar",            af="heaviside",       lbl="cedar / Heaviside"),
-      list(fw="dnfc",             af="abssigmoid_b100", lbl="dnfc / AbsSig"),
-      list(fw="dnfc",             af="heaviside",       lbl="dnfc / Heaviside"),
-      list(fw="dnfc",             af="sigmoid_b100",    lbl="dnfc / Sigmoid"),
-      list(fw="cosivina",         af="sigmoid_b100",    lbl="cosivina / Sigmoid"),
-      list(fw="cosivina-python",  af="sigmoid_b100",    lbl="cosivina-python / Sigmoid")
+      list(fw="cedar-opencv",          af="abssigmoid_b100", lbl="cedar / AbsSig"),
+      list(fw="cedar-opencv",          af="heaviside",       lbl="cedar / Heaviside"),
+      list(fw="dnfc",                  af="abssigmoid_b100", lbl="dnfc / AbsSig"),
+      list(fw="dnfc",                  af="heaviside",       lbl="dnfc / Heaviside"),
+      list(fw="dnfc",                  af="sigmoid_b100",    lbl="dnfc / Sigmoid"),
+      list(fw="cosivina",              af="sigmoid_b100",    lbl="cosivina / Sigmoid"),
+      list(fw="cosivina-python-numba", af="sigmoid_b100",    lbl="cosivina-python / Sigmoid")
     )) {
       sub <- all_loaded %>%
         filter(sim_id == sid, phase == ph, framework == row$fw, act_fn == row$af)
@@ -399,34 +416,33 @@ if (nrow(metrics) > 0) {
 
 cat("\n=== CROSS-PLATFORM VALIDATION SUMMARY ===\n\n")
 
-# ── 1. Algebraic equivalence (same sigmoid family) ──────────────────────────
+# ── 1. Algebraic equivalence (every same-activation-function pair) ───────────
 
-FLOAT32_CEIL <- 2e-4   # Cedar uses CV_32F; dnfc uses float64 → effective ceiling ~1e-4
-FLOAT64_CEIL <- 1e-4   # cosivina vs dnfc both float64; independent numeric paths
+FLOAT32_CEIL <- 2e-4   # Cedar uses CV_32F; pairs with a cedar side → float32 ceiling
+FLOAT64_CEIL <- 1e-4   # all-float64 pairs (cosivina / cosivina-python / dnfc)
 
-same_family_pairs <- c("cedar_abs_vs_dnfc_abs", "cedar_hv_vs_dnfc_hv",
-                       "cosivina_s100_vs_dnfc_s100",
-                       "cosivina_python_s100_vs_dnfc_s100",
-                       "cosivina_python_s100_vs_cosivina_s100")
-same_family_thrs  <- c(FLOAT32_CEIL, FLOAT32_CEIL, FLOAT64_CEIL,
-                       FLOAT64_CEIL, FLOAT64_CEIL)
+# Per-pair threshold: any cedar variant present → float32 ceiling, else float64.
+all_pairs <- names(pairs_list)
+pair_thr  <- ifelse(vapply(all_pairs, pair_is_float32, logical(1)),
+                    FLOAT32_CEIL, FLOAT64_CEIL)
+names(pair_thr) <- all_pairs
 
 cat("--- Algebraic equivalence (same activation function family) ---\n")
-for (i in seq_along(same_family_pairs)) {
-  pr  <- same_family_pairs[i]
-  thr <- same_family_thrs[i]
+for (pr in all_pairs) {
+  thr <- pair_thr[[pr]]
   d   <- metrics %>% filter(pair == pr) %>% pull(max_abs_diff)
   pct <- 100 * mean(d < thr, na.rm = TRUE)
   status <- if (max(d, na.rm=TRUE) < thr) "PASS" else "FAIL"
-  cat(sprintf("  [%s] %-40s  max=%.2e  median=%.2e  %5.1f%% < %.0e\n",
+  cat(sprintf("  [%s] %-44s  max=%.2e  median=%.2e  %5.1f%% < %.0e\n",
               status, pr, max(d, na.rm=TRUE), median(d, na.rm=TRUE), pct, thr))
 }
 
 cat("\n  Interpretation:\n")
-cat("    Cedar (float32) vs dnfc (float64): deviations capped at float32 rounding\n")
-cat("    (~1e-4 ULP ceiling). 99.5% of row comparisons fall below this ceiling.\n")
-cat("    Cosivina vs dnfc (both float64): max deviation 5e-5, all below 1e-4,\n")
-cat("    consistent with independent ODE integration over 500 steps.\n\n")
+cat("    Only same-activation-function pairs are compared (different operators must\n")
+cat("    differ by design). Cedar↔Cedar (same float32, OpenCV vs FFTW engine) and\n")
+cat("    Cedar↔dnfc (float32 vs float64) sit at the float32 ceiling (~1e-4);\n")
+cat("    all-float64 sigmoid pairs (cosivina / cosivina-python / dnfc) agree to ~5e-5,\n")
+cat("    and the same-code-path cosivina-python numba↔nonumba to ~1e-14.\n\n")
 
 # ── 2. Behavioural reliability (qualitative agreement across all 100 sims) ──
 
@@ -458,88 +474,33 @@ by_type <- qual_check %>%
 print(as.data.frame(by_type[, c("type","pair","n","agree","pct")]), digits = 4)
 
 cat("\n  Interpretation:\n")
-cat("    All 100 simulations × 4 comparison pairs produce the same qualitative\n")
+cat("    All 100 simulations × 21 comparison pairs produce the same qualitative\n")
 cat("    field state (suprathreshold bump vs. subthreshold resting state) across\n")
-cat("    all three frameworks, confirming behavioural reliability.\n\n")
+cat("    all six variants, confirming behavioural reliability.\n\n")
 
-# ── 3. Cross-family quantitative summary ────────────────────────────────────
+# ── 3. Per-pair precision summary + validation CSV ──────────────────────────
 
-cat("--- Cross-family deviation summary (cedar AbsSig vs Cosivina Sigmoid) ---\n")
-cross <- metrics %>% filter(pair == "cedar_abs_vs_cosivina_s100")
-cat(sprintf("  All 100 sims × 2 phases (%d comparisons):\n", nrow(cross)))
-cat(sprintf("    Median max|Δu| = %.4f\n", median(cross$max_abs_diff, na.rm=TRUE)))
-cat(sprintf("    Mean   max|Δu| = %.4f\n", mean(cross$max_abs_diff,   na.rm=TRUE)))
-cat(sprintf("    Max    max|Δu| = %.4f  (sim %s, %s)\n",
-            max(cross$max_abs_diff, na.rm=TRUE),
-            cross$sim_id[which.max(cross$max_abs_diff)],
-            cross$phase[which.max(cross$max_abs_diff)]))
-cat("\n  By simulation type:\n")
-cross %>%
-  group_by(type) %>%
-  summarise(n=n(), max=max(max_abs_diff), median=median(max_abs_diff),
-            mean=mean(max_abs_diff), .groups="drop") %>%
-  { print(as.data.frame(.), digits=4) }
+cat("--- Per-pair precision summary ──────────────────────────────────────────\n")
+val_summary <- metrics %>%
+  group_by(pair) %>%
+  summarise(
+    n               = n(),
+    max_max_abs_diff = max(max_abs_diff,    na.rm = TRUE),
+    median_max_abs   = median(max_abs_diff, na.rm = TRUE),
+    mean_max_abs     = mean(max_abs_diff,   na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    threshold       = pair_thr[pair],
+    pct_below_thr   = vapply(pair, function(pr)
+                        100 * mean((metrics %>% filter(pair == pr) %>%
+                                      pull(max_abs_diff)) < pair_thr[[pr]],
+                                   na.rm = TRUE), numeric(1)),
+    algebraic_equiv = max_max_abs_diff < threshold
+  ) %>%
+  arrange(pair)
 
-cat("\n  Interpretation:\n")
-cat("    AbsSigmoid (Cedar) and logistic sigmoid (Cosivina) belong to different\n")
-cat("    families. Their bump profiles differ in width near the activation boundary.\n")
-cat("    For detection/selection/insufficient/multi-peak: median max|Δu| ≈ 0.005–0.009.\n")
-cat("    For memory: deviations up to ~1.7 occur in 2/20 sims (050, 053) that have\n")
-cat("    weak inhibition, producing wider bumps with broader transition zones where\n")
-cat("    the sigmoid shape matters most. Both frameworks consistently exhibit\n")
-cat("    the same qualitative behaviour in these cases.\n\n")
-
-# ── 4. Precision tier table ─────────────────────────────────────────────────
-
-cat("--- Precision tiers ───────────────────────────────────────────────────\n")
-tier_rows <- list(
-  data.frame(
-    pair       = "cedar_abs_vs_dnfc_abs",
-    expected   = "float32 rounding (~1e-4)",
-    observed   = sprintf("%.1e", max(metrics %>% filter(pair=="cedar_abs_vs_dnfc_abs") %>% pull(max_abs_diff))),
-    pct_within = sprintf("%.1f%%", 100*mean((metrics %>% filter(pair=="cedar_abs_vs_dnfc_abs") %>% pull(max_abs_diff)) < 1e-4))
-  ),
-  data.frame(
-    pair       = "cedar_hv_vs_dnfc_hv",
-    expected   = "float32 rounding (~1e-4)",
-    observed   = sprintf("%.1e", max(metrics %>% filter(pair=="cedar_hv_vs_dnfc_hv") %>% pull(max_abs_diff))),
-    pct_within = sprintf("%.1f%%", 100*mean((metrics %>% filter(pair=="cedar_hv_vs_dnfc_hv") %>% pull(max_abs_diff)) < 1e-4))
-  ),
-  data.frame(
-    pair       = "cosivina_s100_vs_dnfc_s100",
-    expected   = "float64 accumulated error (<1e-4)",
-    observed   = sprintf("%.1e", max(metrics %>% filter(pair=="cosivina_s100_vs_dnfc_s100") %>% pull(max_abs_diff))),
-    pct_within = sprintf("%.1f%%", 100*mean((metrics %>% filter(pair=="cosivina_s100_vs_dnfc_s100") %>% pull(max_abs_diff)) < 1e-4))
-  )
-)
-print(as.data.frame(bind_rows(tier_rows)))
-
-# ── 5. Write validation summary CSV ─────────────────────────────────────────
-
-val_summary <- bind_rows(
-  metrics %>% filter(pair %in% same_family_pairs) %>%
-    group_by(pair) %>%
-    summarise(
-      n               = n(),
-      max_max_abs_diff  = max(max_abs_diff,  na.rm=TRUE),
-      median_max_abs    = median(max_abs_diff,na.rm=TRUE),
-      mean_max_abs      = mean(max_abs_diff,  na.rm=TRUE),
-      pct_below_1e4     = 100*mean(max_abs_diff < 1e-4, na.rm=TRUE),
-      algebraic_equiv   = pct_below_1e4 >= 99,
-      .groups = "drop"
-    ),
-  metrics %>% filter(pair == "cedar_abs_vs_cosivina_s100") %>%
-    group_by(pair) %>%
-    summarise(
-      n               = n(),
-      max_max_abs_diff  = max(max_abs_diff,  na.rm=TRUE),
-      median_max_abs    = median(max_abs_diff,na.rm=TRUE),
-      mean_max_abs      = mean(max_abs_diff,  na.rm=TRUE),
-      pct_below_1e4     = 100*mean(max_abs_diff < 1e-4, na.rm=TRUE),
-      algebraic_equiv   = NA,
-      .groups = "drop"
-    )
-)
+print(as.data.frame(val_summary), digits = 4)
 
 write.csv(val_summary, file.path(OUT_DIR, "validation_summary.csv"), row.names = FALSE)
 cat("\nSaved validation_summary.csv\n")
