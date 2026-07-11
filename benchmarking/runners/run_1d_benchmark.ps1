@@ -1,4 +1,4 @@
-# run_1d_benchmark.ps1 — serial 1D benchmark driver (portable).
+﻿# run_1d_benchmark.ps1 — serial 1D benchmark driver (portable).
 #
 # Runs the full 1D matrix SERIALLY:
 #   6 variants (dnfc, cedar-opencv, cedar-fftw, cpy-numba, cpy-nonumba)
@@ -17,13 +17,13 @@ $ErrorActionPreference = "Continue"
 # ============================ EDIT THESE FOR THIS MACHINE ============================
 $ROOT   = "C:\dev-files\dynamic-field-theory-software"                                   # this repo
 $CEDAR  = "C:\dev-files\cedar\bin"                                                       # cedar exes + DLLs
-$DNFC   = "C:\dev-files\dynamic-neural-field-composer\dynamic-neural-field-composer\build\release\examples"  # dnfc exes
+$DNFC   = "C:\dev-files\dynamic-neural-field-composer\dynamic-neural-field-composer\build\release\examples\Release"  # dnfc exes (VS generator)
 
 $CEDAR_DLL_PATHS = @(
-  "C:\Qt\5.15.1\msvc2019_64\bin",
+  "C:\dev-files\Qt\5.15.0\msvc2019_64\bin",
   "C:\dev-files\opencv\opencv-build\bin\Release",
   "C:\dev-files\libQGLViewer\build\Release",
-  "C:\dev-files\glew-2.3.1\bin\Release\x64",
+  "C:\dev-files\glew-2.3.1-win32\glew-2.3.1\bin\Release\x64",
   "C:\dev-files\boost_1_82_0\lib64-msvc-14.3",
   $CEDAR,
   "C:\dev-files\vcpkg\installed\x64-windows\bin"    # fftw3.dll (needed for the fftw variant)
@@ -49,8 +49,8 @@ try {
       & "$DNFC\benchmark_headless.exe" "$D1\timings-dnfc.csv"   $a $NCSV $fs
       & "$CEDAR\benchmark.exe"         "$D1\timings-cedar.csv"  $a opencv $NCSV $fs
       & "$CEDAR\benchmark.exe"         "$D1\timings-cedar.csv"  $a fftw   $NCSV $fs
-      & py -3.11 "$CPY1D" $a numba   $NCSV $fs
-      & py -3.11 "$CPY1D" $a nonumba $NCSV $fs
+      & python "$CPY1D" $a numba   $NCSV $fs
+      & python "$CPY1D" $a nonumba $NCSV $fs
     }
   }
   Write-Output "===== ALLDONE1D  ($(Get-Date)) ====="

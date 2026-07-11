@@ -19,8 +19,10 @@
 #include "cedar/processing/Group.h"
 #include "cedar/processing/StepTime.h"
 #include "cedar/processing/Triggerable.h"
+#include "cedar/processing/sources/GaussInput.h"
 #include "cedar/dynamics/fields/NeuralField.h"
 #include "cedar/auxiliaries/GlobalClock.h"
+#include "cedar/auxiliaries/MatData.h"
 #include "cedar/units/Time.h"
 #include "cedar/units/prefixes.h"
 
@@ -92,24 +94,51 @@ static const Arch& get_arch(const std::string& name)
 // Architecture JSON generation (N independent 2D fields)
 // ---------------------------------------------------------------------------
 
+// Cedar's Gauss kernel taps = ceil(limit*sigma), bumped to the next odd number
+// (cedar::aux::kernel::Gauss::estimateWidth) — a kernel-WIDTH convention. dnfc's/
+// cosivina's cutoffFactor=5 is a kernel-RADIUS convention: taps = 2*min(ceil(5*sigma),
+// field-size cap)+1 (dnfc computeKernelRange). The two are NOT the same units — Cedar's
+// `limit` must be roughly 2x dnfc's cutoff to reach the same tap count. This computes
+// the Cedar limit that reproduces dnfc's exact tap count for a given sigma/grid, so the
+// benchmarked/validated architectures do the same amount of convolution work.
+// Grid-boundary capping can make dnfc's target tap count EVEN (asymmetric cap at small
+// grids); Cedar's kernel is always odd, so in that case we target the nearest odd value
+// below dnfc's cap (off by at most 1 tap) — this only occurs for the dev-only grid=50
+// memory-inhibitory kernel, not for the grids 100/200 used in the final protocol.
+static double fairCedarLimit(double sigma, int grid)
+{
+    const int ceilSigma5 = static_cast<int>(std::ceil(5.0 * sigma));
+    const double half = (grid - 1) / 2.0;
+    const int capFloor = static_cast<int>(std::floor(half));
+    const int capCeil  = static_cast<int>(std::ceil(half));
+    const int rangeLo = std::min(ceilSigma5, capFloor);
+    const int rangeHi = std::min(ceilSigma5, capCeil);
+    int targetTaps = rangeLo + rangeHi + 1;
+    if (targetTaps % 2 == 0) targetTaps -= 1;
+    return (targetTaps - 0.5) / sigma;
+}
+
 // 2D lateral-kernels block: single Gauss, or dual Gauss for Mexican-hat.
-static std::string lateral_kernels_block_2d(const Arch& arch)
+static std::string lateral_kernels_block_2d(const Arch& arch, int grid)
 {
     std::ostringstream k;
     if (arch.kernel == KernelType::Gauss) {
+        const double limit = fairCedarLimit(arch.kSigma, grid);
         k << "{\"cedar.aux.kernel.Gauss\": {\n"
              "                \"dimensionality\": \"2\", \"anchor\": [\"0\", \"0\"], \"amplitude\": \"" << arch.kAmp << "\",\n"
-             "                \"sigmas\": [\"" << arch.kSigma << "\", \"" << arch.kSigma << "\"], \"normalize\": \"true\", \"shifts\": [\"0\", \"0\"], \"limit\": \"5\"\n"
+             "                \"sigmas\": [\"" << arch.kSigma << "\", \"" << arch.kSigma << "\"], \"normalize\": \"true\", \"shifts\": [\"0\", \"0\"], \"limit\": \"" << limit << "\"\n"
              "            }}";
     } else {
+        const double limitExc = fairCedarLimit(arch.kSigmaExc, grid);
+        const double limitInh = fairCedarLimit(arch.kSigmaInh, grid);
         k << "{\n"
              "                \"cedar.aux.kernel.Gauss\": {\n"
              "                    \"dimensionality\": \"2\", \"anchor\": [\"0\", \"0\"], \"amplitude\": \"" << arch.kAmpExc << "\",\n"
-             "                    \"sigmas\": [\"" << arch.kSigmaExc << "\", \"" << arch.kSigmaExc << "\"], \"normalize\": \"true\", \"shifts\": [\"0\", \"0\"], \"limit\": \"5\"\n"
+             "                    \"sigmas\": [\"" << arch.kSigmaExc << "\", \"" << arch.kSigmaExc << "\"], \"normalize\": \"true\", \"shifts\": [\"0\", \"0\"], \"limit\": \"" << limitExc << "\"\n"
              "                },\n"
              "                \"cedar.aux.kernel.Gauss\": {\n"
              "                    \"dimensionality\": \"2\", \"anchor\": [\"0\", \"0\"], \"amplitude\": \"-" << arch.kAmpInh << "\",\n"
-             "                    \"sigmas\": [\"" << arch.kSigmaInh << "\", \"" << arch.kSigmaInh << "\"], \"normalize\": \"true\", \"shifts\": [\"0\", \"0\"], \"limit\": \"5\"\n"
+             "                    \"sigmas\": [\"" << arch.kSigmaInh << "\", \"" << arch.kSigmaInh << "\"], \"normalize\": \"true\", \"shifts\": [\"0\", \"0\"], \"limit\": \"" << limitInh << "\"\n"
              "                }\n"
              "            }";
     }
@@ -120,7 +149,7 @@ static std::string build_architecture_json(int n, const Arch& arch, const std::s
                                            int grid)
 {
     const double pos_scale = static_cast<double>(grid) / BASE_GRID;
-    const std::string lateral = lateral_kernels_block_2d(arch);
+    const std::string lateral = lateral_kernels_block_2d(arch, grid);
     const std::string global_inh =
         (arch.kernel == KernelType::Gauss && arch.kGlobal != 0.0)
             ? std::to_string(arch.kGlobal)
@@ -158,7 +187,7 @@ static std::string build_architecture_json(int n, const Arch& arch, const std::s
           "            \"dimensionality\": \"2\", \"sizes\": [\"" << grid << "\", \"" << grid << "\"],\n"
           "            \"time scale\": \"" << TAU << "\", \"resting level\": \"" << arch.h << "\",\n"
           "            \"input noise gain\": \"" << NOISE_GAIN << "\",\n"
-          "            \"sigmoid\": {\"type\": \"cedar.aux.math.AbsSigmoid\", \"threshold\": \"0\", \"beta\": \"" << BETA << "\"},\n"
+          "            \"sigmoid\": {\"type\": \"cedar.aux.math.ExpSigmoid\", \"threshold\": \"0\", \"beta\": \"" << BETA << "\"},\n"
           "            \"global inhibition\": \"" << global_inh << "\",\n"
           "            \"lateral kernels\": " << lateral << ",\n"
           "            \"lateral kernel convolution\": {\n"
@@ -189,6 +218,55 @@ static std::string build_architecture_json(int n, const Arch& arch, const std::s
 }
 
 // ---------------------------------------------------------------------------
+// Behavioral-validation mode: dump field 0's final activation
+// ---------------------------------------------------------------------------
+
+static void dump_final_field(const Arch& arch, const std::string& variant, int grid,
+                              int timedSteps, const std::string& dumpPath)
+{
+    const fs::path tmp = fs::temp_directory_path() /
+        ("cedar_bench2d_dump_" + arch.name + "_" + variant + "_fs" + std::to_string(grid) + ".json");
+    { std::ofstream f(tmp); f << build_architecture_json(1, arch, variant, grid); }
+
+    cedar::proc::GroupPtr group(new cedar::proc::Group());
+    group->readJson(tmp.string());
+
+    cedar::dyn::NeuralFieldPtr field;
+    std::vector<cedar::proc::sources::GaussInputPtr> stimuli;
+    for (const auto& name_element : group->getElements()) {
+        auto f = boost::dynamic_pointer_cast<cedar::dyn::NeuralField>(name_element.second);
+        if (f && !field) field = f;
+        auto gi = boost::dynamic_pointer_cast<cedar::proc::sources::GaussInput>(name_element.second);
+        if (gi) stimuli.push_back(gi);
+    }
+
+    auto clock = cedar::aux::GlobalClockSingleton::getInstance();
+    auto step_one = [&]() {
+        clock->addTime(STEP_TIME);
+        cedar::proc::ArgumentsPtr args(new cedar::proc::StepTime(STEP_TIME, clock->getTime()));
+        field->onTrigger(args, cedar::proc::TriggerPtr());
+    };
+
+    if (arch.name == "memory") {
+        // Establish the bump with the stimulus on, then remove it — behavioral
+        // dumps for "memory" must show genuine self-sustained persistence.
+        for (int t = 0; t < 100; ++t) step_one();
+        for (auto& gi : stimuli) gi->setAmplitude(0.0);
+    }
+
+    for (int t = 0; t < timedSteps; ++t) step_one();
+
+    const cv::Mat& act = field->getFieldActivation()->getData();
+    std::FILE* fp = std::fopen(dumpPath.c_str(), "w");
+    if (!fp) { std::fprintf(stderr, "Cannot open %s\n", dumpPath.c_str()); return; }
+    for (int yi = 0; yi < act.rows; ++yi)
+        for (int xi = 0; xi < act.cols; ++xi)
+            std::fprintf(fp, "%.10g\n", static_cast<double>(act.at<float>(yi, xi)));
+    std::fclose(fp);
+    std::error_code ec; fs::remove(tmp, ec);
+}
+
+// ---------------------------------------------------------------------------
 // Benchmark one N value
 // ---------------------------------------------------------------------------
 
@@ -204,9 +282,12 @@ static void run_benchmark(int n, const Arch& arch, const std::string& variant,
     group->readJson(tmp.string());
 
     std::vector<cedar::dyn::NeuralFieldPtr> fields;
+    std::vector<cedar::proc::sources::GaussInputPtr> stimuli;
     for (const auto& name_element : group->getElements()) {
         auto f = boost::dynamic_pointer_cast<cedar::dyn::NeuralField>(name_element.second);
         if (f) fields.push_back(f);
+        auto gi = boost::dynamic_pointer_cast<cedar::proc::sources::GaussInput>(name_element.second);
+        if (gi) stimuli.push_back(gi);
     }
 
     auto clock = cedar::aux::GlobalClockSingleton::getInstance();
@@ -215,6 +296,14 @@ static void run_benchmark(int n, const Arch& arch, const std::string& variant,
         cedar::proc::ArgumentsPtr args(new cedar::proc::StepTime(STEP_TIME, clock->getTime()));
         for (auto& f : fields) f->onTrigger(args, cedar::proc::TriggerPtr());
     };
+
+    if (arch.name == "memory") {
+        // Establish the bump with the stimulus on for 100 steps, then remove it —
+        // the warmup + timed measurement below covers genuine self-sustained memory
+        // maintenance, not stimulus-driven activity.
+        for (int t = 0; t < 100; ++t) step_all();
+        for (auto& gi : stimuli) gi->setAmplitude(0.0);
+    }
 
     for (int t = 0; t < WARMUP_STEPS; ++t) step_all();
 
@@ -283,6 +372,13 @@ int main(int argc, char* argv[])
     }
 
     const int grid = (argc > 5) ? std::stoi(argv[5]) : BASE_GRID;
+
+    if (argc > 6) {
+        // Behavioral-validation mode: dump field 0's final activation instead of timing.
+        const int timedSteps = (argc > 7) ? std::stoi(argv[7]) : TIMED_STEPS;
+        dump_final_field(arch, variant, grid, timedSteps, argv[6]);
+        return 0;
+    }
 
     std::printf("Cedar 2D headless benchmark [arch=%s variant=%s grid=%dx%d] (real API, cv threads=0) -> %s\n",
                 arch.name.c_str(), variant.c_str(), grid, grid, outfile.c_str());

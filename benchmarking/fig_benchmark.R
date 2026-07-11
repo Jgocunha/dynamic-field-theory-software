@@ -38,7 +38,9 @@ col_spec <- cols(
 ARCH_ORDER <- c("detection", "selection", "memory", "multi-peak")
 
 make_fwv <- function(framework, variant) {
-  ifelse(variant == "default", framework, paste0(framework, " (", variant, ")"))
+  # "opencv"/"numba" are each framework's primary variant, matching the bare
+  # "cedar"/"cosivina-python" keys in fw_labels/fw_colors/fw_shapes/fw_lty below.
+  ifelse(variant %in% c("default", "opencv", "numba"), framework, paste0(framework, " (", variant, ")"))
 }
 
 read_fw <- function(f) {

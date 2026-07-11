@@ -108,10 +108,10 @@ df_dnfc     <- load_framework("dnfc",
 # → expected to agree to ~float32 epsilon on stable architectures; opencv is the
 # canonical cedar for cross-framework pairs.
 df_cedar_opencv <- load_framework("cedar-opencv",
-                                  c("abssigmoid_b100", "heaviside"),
+                                  c("abssigmoid_b100", "heaviside", "sigmoid_b100"),
                                   apply_cedar_shift = TRUE)  # correct 0-based offset
 df_cedar_fftw   <- load_framework("cedar-fftw",
-                                  c("abssigmoid_b100", "heaviside"),
+                                  c("abssigmoid_b100", "heaviside", "sigmoid_b100"),
                                   apply_cedar_shift = TRUE)
 
 all_loaded <- bind_rows(df_cosivina, df_cpy_numba, df_cpy_nonumba,
@@ -169,11 +169,14 @@ VAR_TOKEN <- c(
 
 # Algebraic equivalence is only meaningful WITHIN the same activation-function
 # family (comparing different operators must differ by design). For each family,
-# emit every C(n,2) variant pair → 3 (AbsSig) + 3 (Heaviside) + 6 (Sigmoid) = 12.
+# emit every C(n,2) variant pair → 3 (AbsSig) + 3 (Heaviside) + 15 (Sigmoid) = 21.
+# Sigmoid now includes cedar-opencv/cedar-fftw too (fair kernel-parity + ExpSigmoid
+# fix let Cedar run the plain-logistic variant, giving a same-activation-function
+# comparison against Cedar that previously only existed for AbsSig/Heaviside).
 families <- list(
   abssigmoid_b100 = c("cedar-opencv", "cedar-fftw", "dnfc"),
   heaviside       = c("cedar-opencv", "cedar-fftw", "dnfc"),
-  sigmoid_b100    = c("cosivina", "cosivina-python-numba",
+  sigmoid_b100    = c("cedar-opencv", "cedar-fftw", "cosivina", "cosivina-python-numba",
                       "cosivina-python-nonumba", "dnfc")
 )
 
@@ -257,6 +260,15 @@ PAIR_LABELS <- c(
   cedar_opencv_vs_dnfc_heaviside             = "Cedar-OpenCV HV vs dnfc HV",
   cedar_fftw_vs_dnfc_heaviside               = "Cedar-FFTW HV vs dnfc HV",
   # Sigmoid family
+  cedar_opencv_vs_cedar_fftw_sigmoid_b100    = "Cedar-OpenCV vs Cedar-FFTW (Sig)",
+  cedar_opencv_vs_cosivina_sigmoid_b100      = "Cedar-OpenCV Sig vs Cosivina Sig",
+  cedar_opencv_vs_cpy_numba_sigmoid_b100     = "Cedar-OpenCV Sig vs Cosivina-Python numba Sig",
+  cedar_opencv_vs_cpy_nonumba_sigmoid_b100   = "Cedar-OpenCV Sig vs Cosivina-Python nonumba Sig",
+  cedar_opencv_vs_dnfc_sigmoid_b100          = "Cedar-OpenCV Sig vs dnfc Sig",
+  cedar_fftw_vs_cosivina_sigmoid_b100        = "Cedar-FFTW Sig vs Cosivina Sig",
+  cedar_fftw_vs_cpy_numba_sigmoid_b100       = "Cedar-FFTW Sig vs Cosivina-Python numba Sig",
+  cedar_fftw_vs_cpy_nonumba_sigmoid_b100     = "Cedar-FFTW Sig vs Cosivina-Python nonumba Sig",
+  cedar_fftw_vs_dnfc_sigmoid_b100            = "Cedar-FFTW Sig vs dnfc Sig",
   cosivina_vs_cpy_numba_sigmoid_b100         = "Cosivina vs Cosivina-Python numba (Sig)",
   cosivina_vs_cpy_nonumba_sigmoid_b100       = "Cosivina vs Cosivina-Python nonumba (Sig)",
   cosivina_vs_dnfc_sigmoid_b100              = "Cosivina Sig vs dnfc Sig",

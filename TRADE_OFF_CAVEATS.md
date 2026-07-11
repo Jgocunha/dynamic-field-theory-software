@@ -50,10 +50,53 @@ structural facts follow:
 
 ## 3. Single machine; absolute numbers are not portable
 
-All measurements come from one CPU in one back-to-back session on an otherwise-idle
-machine, single-threaded (each runner pins its math-library thread pools to 1; see the
-Test Machine table). Results depend on this specific CPU, its boost/thermal state, and
-the linked BLAS/FFT backend (NumPy/numba → the installed NumPy BLAS; MATLAB → its
-bundled libraries; Cedar/dnfc → MSVC + AVX2). Ten runs per cell quantify run-to-run
-noise *on this machine*, not the generality of the result across hardware. **Report the
-cross-framework ratios as the finding; treat absolute sps as illustrative.**
+All measurements come from one CPU on an otherwise-idle machine, single-threaded (each
+runner pins its math-library thread pools to 1; see the Test Machine table). Results
+depend on this specific CPU, its boost/thermal state, and the linked BLAS/FFT backend
+(NumPy/numba → the installed NumPy BLAS; MATLAB → its bundled libraries; Cedar/dnfc →
+MSVC + AVX2). Five runs per cell (`analysis.R`/`analysis_2d.R` report median, SD, SEM,
+and a 95% CI per cell) quantify short-timescale run-to-run noise *on this machine*, not
+the generality of the result across hardware. **Report the cross-framework ratios as the
+finding; treat absolute sps as illustrative.**
+
+## 4. Re-run spans multiple sessions; thermal/load conditions not explicitly monitored
+
+The final data set was **not** collected in one uninterrupted sitting. After the
+kernel-extent/activation-function/two-phase-memory fairness fixes, the full re-run was
+executed across several separate launches over about a day, including one ~9-hour
+unattended background run for the slowest cells (cosivina-python, `nonumba` variant,
+grid 200). CPU turbo-boost behavior, thermal throttling, and background load were **not**
+explicitly logged or controlled across that span — only checked to be idle at launch
+time. The within-session 5-run spread (§3) captures short-timescale noise; it does not
+bound session-to-session drift (e.g. a thermally-throttled late-night run vs. a cool
+morning one). **Before citing absolute numbers or tight cross-run comparisons, spot-check
+a handful of cells by re-running them back-to-back on a freshly-idle machine** to confirm
+they land within the reported CI.
+
+## 5. Cross-framework ranking reflects framework architecture, not implementation quality
+
+Throughput differences are driven substantially by each framework's *architectural*
+design, not purely by the DFT algorithm or its numerical implementation. Cedar is a
+general robotics/cognitive-architecture framework: every field-step pays a structural
+tax — Qt read/write locks, `Step::onTrigger` dispatch (state checks, validity checks,
+timestamp comparisons), `cv::copyMakeBorder` allocation for cyclic OpenCV convolution,
+and a non-fused multi-pass Euler update — that a framework built purely for DFT
+simulation does not. dnfc and Cosivina/cosivina-python are comparatively lean: a flat
+loop over element handles with no locking or generic typed-data-slot indirection. This
+was verified by source-level inspection of Cedar's `Step::onTrigger` /
+`NeuralField::eulerStep` (see `cedar-notes.md`), not inferred from the timings alone.
+**The correct claim from this benchmark is "purpose-built lean engines beat Cedar's
+general-framework overhead on raw per-step throughput," not a blanket claim that any one
+framework's implementation of the DFT equations is categorically better** — Cedar's
+overhead is the price of generality (typed data slots, thread-safe triggers, GUI/robotics
+integration) that the other frameworks don't provide.
+
+## 6. Benchmark and validation configs are independently maintained
+
+The fairness fixes (kernel-extent parity, activation-function match) were applied by
+hand to **two separate code paths per framework**: the throughput-benchmark driver and
+the `cross-platform-validation(-2d)` simulation generator. The two were cross-checked to
+agree (winner-take-all selection dumps, memory-bump-persistence dumps) but are not
+derived from one shared source of truth. If either is edited in the future without the
+other, they can silently drift apart — worth a periodic re-check, not a one-time
+guarantee.

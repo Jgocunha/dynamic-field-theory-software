@@ -209,7 +209,30 @@ def cedar_sigmoid(name: str) -> dict:
         return {"type": "cedar.aux.math.AbsSigmoid", "threshold": "0", "beta": "100"}
     if name == "heaviside":
         return {"type": "cedar.aux.math.HeavisideSigmoid", "threshold": "0"}
+    if name == "sigmoid_b100":
+        return {"type": "cedar.aux.math.ExpSigmoid", "threshold": "0", "beta": "100"}
     raise ValueError(name)
+
+
+def fair_cedar_limit(sigma: float, field_size: int) -> float:
+    """Cedar's Gauss kernel taps = ceil(limit*sigma), bumped to the next odd number
+    (cedar::aux::kernel::Gauss::estimateWidth) — a kernel-WIDTH convention. dnfc's/
+    cosivina's cutoffFactor=5 is a kernel-RADIUS convention: taps = 2*min(ceil(5*sigma),
+    field-size cap)+1 (dnfc computeKernelRange). The two are NOT the same units —
+    Cedar's `limit` must be roughly 2x dnfc's cutoff to reach the same tap count.
+    Returns the Cedar limit that reproduces dnfc's exact tap count for this
+    sigma/field size, so validated architectures do the same convolution work."""
+    import math
+    ceil_sigma5 = math.ceil(5.0 * sigma)
+    half = (field_size - 1) / 2.0
+    cap_floor = math.floor(half)
+    cap_ceil = math.ceil(half)
+    range_lo = min(ceil_sigma5, cap_floor)
+    range_hi = min(ceil_sigma5, cap_ceil)
+    target_taps = range_lo + range_hi + 1
+    if target_taps % 2 == 0:
+        target_taps -= 1
+    return (target_taps - 0.5) / sigma
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +460,7 @@ def build_cedar_json_str(sim: dict, act_fn: str, engine: str = "cedar.aux.conv.O
 
     # Build lateral kernels block
     if k["type"] == "gauss":
+        limit = fair_cedar_limit(k["sigma"], 100)
         lateral_kernels = f"""{{
                 "cedar.aux.kernel.Gauss": {{
                     "dimensionality": "1",
@@ -445,11 +469,13 @@ def build_cedar_json_str(sim: dict, act_fn: str, engine: str = "cedar.aux.conv.O
                     "sigmas": ["{k['sigma']}"],
                     "normalize": "true",
                     "shifts": ["0"],
-                    "limit": "10"
+                    "limit": "{limit}"
                 }}
             }}"""
     else:
         # Two Gauss entries (duplicate key — Cedar-specific)
+        limit_exc = fair_cedar_limit(k["sigma_exc"], 100)
+        limit_inh = fair_cedar_limit(k["sigma_inh"], 100)
         lateral_kernels = f"""{{
                 "cedar.aux.kernel.Gauss": {{
                     "dimensionality": "1",
@@ -458,7 +484,7 @@ def build_cedar_json_str(sim: dict, act_fn: str, engine: str = "cedar.aux.conv.O
                     "sigmas": ["{k['sigma_exc']}"],
                     "normalize": "true",
                     "shifts": ["0"],
-                    "limit": "10"
+                    "limit": "{limit_exc}"
                 }},
                 "cedar.aux.kernel.Gauss": {{
                     "dimensionality": "1",
@@ -467,7 +493,7 @@ def build_cedar_json_str(sim: dict, act_fn: str, engine: str = "cedar.aux.conv.O
                     "sigmas": ["{k['sigma_inh']}"],
                     "normalize": "true",
                     "shifts": ["0"],
-                    "limit": "10"
+                    "limit": "{limit_inh}"
                 }}
             }}"""
 
@@ -806,7 +832,7 @@ if __name__ == "__main__":
 
 def main():
     dnfc_act_fns  = ["abssigmoid_b100", "heaviside", "sigmoid_b100"]
-    cedar_act_fns = ["abssigmoid_b100", "heaviside"]
+    cedar_act_fns = ["abssigmoid_b100", "heaviside", "sigmoid_b100"]
 
     cosivina_out        = str(ROOT / "data" / "cosivina")
     cosivina_python_out = str(ROOT / "data" / "cosivina-python")

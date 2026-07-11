@@ -30,7 +30,10 @@ NOISE_AMP    = 0.1;    % benchmark uses A>0 so the RNG cost is measured
 BASE_SIZE    = 100;    % reference grid the arch positions are defined on
 
 % Architecture x N x field-size matrix: 4 canonical archs, across N and field size.
-ARCH_LIST    = {'detection', 'selection', 'memory', 'multi-peak'};
+% Scoped to 'memory' only for the post-Tier-1 wrap-up re-run: detection/selection/
+% multi-peak rows are unaffected by the two-phase memory protocol and already valid
+% in timings-cosivina.csv. Restore the full list to re-run everything from scratch.
+ARCH_LIST    = {'memory'};
 ARCH_N       = [5, 10, 50, 100];
 FIELD_SIZES  = [100, 500];
 
@@ -59,16 +62,29 @@ fprintf('\nDone. Results appended to %s\n', OUTPUT_FILE);
 % ===========================================================================
 
 function run_arch(fid, archName, N_VALUES, fieldSize, baseSize, noiseAmp, WARMUP_STEPS, TIMED_STEPS, N_RUNS)
+    isMemory = strcmp(archName, 'memory');
     for ni = 1:length(N_VALUES)
         N = N_VALUES(ni);
         fprintf('=== Cosivina  %s  fs=%d  N=%d ===\n', archName, fieldSize, N);
 
-        sim = build_sim(N, archName, fieldSize, baseSize, noiseAmp);
+        [sim, stimHandles] = build_sim(N, archName, fieldSize, baseSize, noiseAmp);
         sim.init();
         for t = 1:WARMUP_STEPS; sim.step(); end
 
         for r = 1:N_RUNS
             sim.init();
+            % Two-phase memory protocol: sim.init() recomputes each stimulus's
+            % output from its (untouched) amplitude property, so the bump is
+            % always freshly established here; run 100 steps with it on, then
+            % zero output IN PLACE (zeroing .amplitude instead would not
+            % propagate, since GaussStimulus.output is only recomputed on
+            % init()) so the timed run measures self-sustained memory only.
+            if isMemory
+                for t = 1:100; sim.step(); end
+                for s = 1:numel(stimHandles)
+                    stimHandles{s}.output(:) = 0;
+                end
+            end
             t0 = tic;
             for t = 1:TIMED_STEPS; sim.step(); end
             elapsed = toc(t0);
@@ -79,7 +95,7 @@ function run_arch(fid, archName, N_VALUES, fieldSize, baseSize, noiseAmp, WARMUP
     end
 end
 
-function sim = build_sim(N, archName, fieldSize, baseSize, noiseAmp)
+function [sim, stimHandles] = build_sim(N, archName, fieldSize, baseSize, noiseAmp)
     % Representative-sim parameters per architecture (validation sims
     % 001/021/041/081). See cross-platform-validation/generate_simulations.py.
     pos_scale = fieldSize / baseSize;
@@ -103,6 +119,7 @@ function sim = build_sim(N, archName, fieldSize, baseSize, noiseAmp)
             error('Unknown arch: %s', archName);
     end
 
+    stimHandles = {};
     for i = 1:N
         suffix = num2str(i);
         name_n   = ['noise_' suffix];
@@ -114,8 +131,10 @@ function sim = build_sim(N, archName, fieldSize, baseSize, noiseAmp)
         for s = 1:size(stimuli, 1)
             name_s = ['stimulus_' suffix '_' num2str(s)];
             stim_names{s} = name_s;
-            sim.addElement(GaussStimulus1D(name_s, fieldSize, ...
-                stimuli(s,2), stimuli(s,1), stimuli(s,3) * pos_scale, true, false));
+            stimHandle = GaussStimulus1D(name_s, fieldSize, ...
+                stimuli(s,2), stimuli(s,1), stimuli(s,3) * pos_scale, true, false);
+            sim.addElement(stimHandle);
+            stimHandles{end+1} = stimHandle; %#ok<AGROW>
         end
 
         sim.addElement(NormalNoise(name_n, fieldSize, noiseAmp));

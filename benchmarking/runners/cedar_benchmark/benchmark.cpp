@@ -18,6 +18,7 @@
 #include "cedar/processing/Group.h"
 #include "cedar/processing/StepTime.h"
 #include "cedar/processing/Triggerable.h"
+#include "cedar/processing/sources/GaussInput.h"
 #include "cedar/dynamics/fields/NeuralField.h"
 #include "cedar/auxiliaries/GlobalClock.h"
 #include "cedar/units/Time.h"
@@ -89,25 +90,48 @@ static const Arch& get_arch(const std::string& name)
 // Architecture JSON generation (N independent fields)
 // ---------------------------------------------------------------------------
 
+// Cedar's Gauss kernel taps = ceil(limit*sigma), bumped to the next odd number
+// (cedar::aux::kernel::Gauss::estimateWidth) — a kernel-WIDTH convention. dnfc's/
+// cosivina's cutoffFactor=5 is a kernel-RADIUS convention: taps = 2*min(ceil(5*sigma),
+// field-size cap)+1 (dnfc computeKernelRange). The two are NOT the same units — Cedar's
+// `limit` must be roughly 2x dnfc's cutoff to reach the same tap count. This computes
+// the Cedar limit that reproduces dnfc's exact tap count for a given sigma/field size,
+// so the benchmarked/validated architectures do the same amount of convolution work.
+static double fairCedarLimit(double sigma, int fieldSize)
+{
+    const int ceilSigma5 = static_cast<int>(std::ceil(5.0 * sigma));
+    const double half = (fieldSize - 1) / 2.0;
+    const int capFloor = static_cast<int>(std::floor(half));
+    const int capCeil  = static_cast<int>(std::ceil(half));
+    const int rangeLo = std::min(ceilSigma5, capFloor);
+    const int rangeHi = std::min(ceilSigma5, capCeil);
+    int targetTaps = rangeLo + rangeHi + 1;
+    if (targetTaps % 2 == 0) targetTaps -= 1;
+    return (targetTaps - 0.5) / sigma;
+}
+
 // Emit the "lateral kernels" block for an architecture. Mexican-hat is two Gauss
 // entries (excitatory + negative inhibitory), matching the validation generator.
-static std::string lateral_kernels_block(const Arch& arch)
+static std::string lateral_kernels_block(const Arch& arch, int field_size)
 {
     std::ostringstream k;
     if (arch.kernel == KernelType::Gauss) {
+        const double limit = fairCedarLimit(arch.kSigma, field_size);
         k << "{\"cedar.aux.kernel.Gauss\": {\n"
              "                \"dimensionality\": \"1\", \"anchor\": [\"0\"], \"amplitude\": \"" << arch.kAmp << "\",\n"
-             "                \"sigmas\": [\"" << arch.kSigma << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"5\"\n"
+             "                \"sigmas\": [\"" << arch.kSigma << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"" << limit << "\"\n"
              "            }}";
     } else {
+        const double limitExc = fairCedarLimit(arch.kSigmaExc, field_size);
+        const double limitInh = fairCedarLimit(arch.kSigmaInh, field_size);
         k << "{\n"
              "                \"cedar.aux.kernel.Gauss\": {\n"
              "                    \"dimensionality\": \"1\", \"anchor\": [\"0\"], \"amplitude\": \"" << arch.kAmpExc << "\",\n"
-             "                    \"sigmas\": [\"" << arch.kSigmaExc << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"5\"\n"
+             "                    \"sigmas\": [\"" << arch.kSigmaExc << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"" << limitExc << "\"\n"
              "                },\n"
              "                \"cedar.aux.kernel.Gauss\": {\n"
              "                    \"dimensionality\": \"1\", \"anchor\": [\"0\"], \"amplitude\": \"-" << arch.kAmpInh << "\",\n"
-             "                    \"sigmas\": [\"" << arch.kSigmaInh << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"5\"\n"
+             "                    \"sigmas\": [\"" << arch.kSigmaInh << "\"], \"normalize\": \"true\", \"shifts\": [\"0\"], \"limit\": \"" << limitInh << "\"\n"
              "                }\n"
              "            }";
     }
@@ -118,7 +142,7 @@ static std::string build_architecture_json(int n, const Arch& arch, const std::s
                                            int field_size)
 {
     const double pos_scale = static_cast<double>(field_size) / BASE_SIZE;
-    const std::string lateral = lateral_kernels_block(arch);
+    const std::string lateral = lateral_kernels_block(arch, field_size);
     const std::string global_inh =
         (arch.kernel == KernelType::Gauss && arch.kGlobal != 0.0)
             ? std::to_string(arch.kGlobal) : "0";
@@ -156,7 +180,7 @@ static std::string build_architecture_json(int n, const Arch& arch, const std::s
           "            \"dimensionality\": \"1\", \"sizes\": [\"" << field_size << "\"],\n"
           "            \"time scale\": \"" << TAU << "\", \"resting level\": \"" << arch.h << "\",\n"
           "            \"input noise gain\": \"" << NOISE_GAIN << "\",\n"
-          "            \"sigmoid\": {\"type\": \"cedar.aux.math.AbsSigmoid\", \"threshold\": \"0\", \"beta\": \"" << BETA << "\"},\n"
+          "            \"sigmoid\": {\"type\": \"cedar.aux.math.ExpSigmoid\", \"threshold\": \"0\", \"beta\": \"" << BETA << "\"},\n"
           "            \"global inhibition\": \"" << global_inh << "\",\n"
           "            \"lateral kernels\": " << lateral << ",\n"
           "            \"lateral kernel convolution\": {\n"
@@ -206,9 +230,12 @@ static void run_benchmark(int n, const Arch& arch, const std::string& variant,
     // has no listeners; stepping it would be a no-op). Each step needs a strictly
     // increasing global timestamp or Step::onTrigger skips compute().
     std::vector<cedar::dyn::NeuralFieldPtr> fields;
+    std::vector<cedar::proc::sources::GaussInputPtr> stimuli;
     for (const auto& name_element : group->getElements()) {
         auto f = boost::dynamic_pointer_cast<cedar::dyn::NeuralField>(name_element.second);
         if (f) fields.push_back(f);
+        auto gi = boost::dynamic_pointer_cast<cedar::proc::sources::GaussInput>(name_element.second);
+        if (gi) stimuli.push_back(gi);
     }
 
     auto clock = cedar::aux::GlobalClockSingleton::getInstance();
@@ -217,6 +244,14 @@ static void run_benchmark(int n, const Arch& arch, const std::string& variant,
         cedar::proc::ArgumentsPtr args(new cedar::proc::StepTime(STEP_TIME, clock->getTime()));
         for (auto& f : fields) f->onTrigger(args, cedar::proc::TriggerPtr());
     };
+
+    if (arch.name == "memory") {
+        // Establish the bump with the stimulus on for 100 steps, then remove it —
+        // the warmup + timed measurement below covers genuine self-sustained memory
+        // maintenance, not stimulus-driven activity.
+        for (int t = 0; t < 100; ++t) step_all();
+        for (auto& gi : stimuli) gi->setAmplitude(0.0);
+    }
 
     // Warm-up
     for (int t = 0; t < WARMUP_STEPS; ++t) step_all();

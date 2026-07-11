@@ -125,6 +125,24 @@ def create_sim(n: int, arch: dict, grid: int):
     return sim
 
 
+def establish_then_remove_stimulus(stimuli, sim):
+    """For "memory": establish the bump with the stimulus on for 100 steps, then
+    remove it — the timed measurement covers genuine self-sustained memory
+    maintenance, not stimulus-driven activity.
+    sim.init() (called once per run, right before this) rebuilds every element's
+    output from its current attributes, including GaussStimulus2D.output from its
+    (untouched) amplitude — so the stimulus is correctly re-established for free at
+    the top of each run. Downstream elements (e.g. SumInputs) cache a direct
+    reference to that output ARRAY OBJECT at sim.init() time (Simulator.init():
+    `el.inputs.append(getattr(ie, ...))`), so removing the stimulus must mutate the
+    array IN PLACE (stim.output[:] = 0) rather than reassign stim.output — a
+    reassignment would silently stop propagating to already-wired consumers."""
+    for _ in range(100):
+        sim.step()
+    for stim in stimuli:
+        stim.output[:] = 0.0
+
+
 def main():
     # Usage: cosivina_python_benchmark_2d.py [arch] [variant] [N_csv] [grid_side]
     #   arch        detection|selection|memory|multi-peak (default detection)
@@ -165,12 +183,19 @@ def main():
             print(f"=== cosivina-python/{variant} 2D  {arch_name}  grid={grid}x{grid}  N={n} ===")
 
             sim = create_sim(n, arch, grid)
+
+            stimuli = []
+            if arch_name == "memory":
+                stimuli = [el for el in sim.elements if isinstance(el, GaussStimulus2D)]
+
             sim.init()
             for _ in range(WARMUP_STEPS):
                 sim.step()
 
             for r in range(1, N_RUNS + 1):
                 sim.init()
+                if arch_name == "memory":
+                    establish_then_remove_stimulus(stimuli, sim)
                 t0 = time.perf_counter()
                 for _ in range(TIMED_STEPS):
                     sim.step()

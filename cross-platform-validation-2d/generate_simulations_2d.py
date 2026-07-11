@@ -40,7 +40,7 @@ ONE_D = ROOT.parent / "cross-platform-validation"
 # Reuse the exact 100-sim parameter table + activation-function helpers from the
 # 1D generator so the two suites stay in lockstep.
 sys.path.insert(0, str(ONE_D))
-from generate_simulations import SIMS, dnfc_act_fn, cedar_sigmoid  # noqa: E402
+from generate_simulations import SIMS, dnfc_act_fn, cedar_sigmoid, fair_cedar_limit  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 2D configuration
@@ -197,6 +197,7 @@ def build_cedar_json_2d(sim: dict, act_fn: str, engine: str = "cedar.aux.conv.Op
 
     # Lateral kernels (2D Gauss, or two Gauss for mexican hat)
     if k["type"] == "gauss":
+        limit = fair_cedar_limit(k["sigma"], FIELD)
         lateral_kernels = f"""{{
                 "cedar.aux.kernel.Gauss": {{
                     "dimensionality": "2",
@@ -205,10 +206,12 @@ def build_cedar_json_2d(sim: dict, act_fn: str, engine: str = "cedar.aux.conv.Op
                     "sigmas": ["{k['sigma']}", "{k['sigma']}"],
                     "normalize": "true",
                     "shifts": ["0", "0"],
-                    "limit": "10"
+                    "limit": "{limit}"
                 }}
             }}"""
     else:
+        limit_exc = fair_cedar_limit(k["sigma_exc"], FIELD)
+        limit_inh = fair_cedar_limit(k["sigma_inh"], FIELD)
         lateral_kernels = f"""{{
                 "cedar.aux.kernel.Gauss": {{
                     "dimensionality": "2",
@@ -217,7 +220,7 @@ def build_cedar_json_2d(sim: dict, act_fn: str, engine: str = "cedar.aux.conv.Op
                     "sigmas": ["{k['sigma_exc']}", "{k['sigma_exc']}"],
                     "normalize": "true",
                     "shifts": ["0", "0"],
-                    "limit": "10"
+                    "limit": "{limit_exc}"
                 }},
                 "cedar.aux.kernel.Gauss": {{
                     "dimensionality": "2",
@@ -226,7 +229,7 @@ def build_cedar_json_2d(sim: dict, act_fn: str, engine: str = "cedar.aux.conv.Op
                     "sigmas": ["{k['sigma_inh']}", "{k['sigma_inh']}"],
                     "normalize": "true",
                     "shifts": ["0", "0"],
-                    "limit": "10"
+                    "limit": "{limit_inh}"
                 }}
             }}"""
 
@@ -532,7 +535,7 @@ if __name__ == "__main__":
 
 def main():
     dnfc_act_fns  = ["abssigmoid_b100", "heaviside", "sigmoid_b100"]
-    cedar_act_fns = ["abssigmoid_b100", "heaviside"]
+    cedar_act_fns = ["abssigmoid_b100", "heaviside", "sigmoid_b100"]
 
     cosivina_out        = str(ROOT / "data" / "cosivina")
     cosivina_python_out = str(ROOT / "data" / "cosivina-python")

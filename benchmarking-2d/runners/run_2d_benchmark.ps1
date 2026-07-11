@@ -1,4 +1,4 @@
-# run_2d_benchmark.ps1 — serial 2D benchmark driver (portable).
+﻿# run_2d_benchmark.ps1 — serial 2D benchmark driver (portable).
 #
 # Runs the full 2D matrix SERIALLY:
 #   6 variants (dnfc, cedar-opencv, cedar-fftw, cpy-numba, cpy-nonumba)
@@ -21,21 +21,21 @@ $ErrorActionPreference = "Continue"
 # ============================ EDIT THESE FOR THIS MACHINE ============================
 $ROOT   = "C:\dev-files\dynamic-field-theory-software"                                   # this repo
 $CEDAR  = "C:\dev-files\cedar\bin"                                                       # cedar exes + DLLs
-$DNFC   = "C:\dev-files\dynamic-neural-field-composer\dynamic-neural-field-composer\build\release\examples"  # dnfc exes
+$DNFC   = "C:\dev-files\dynamic-neural-field-composer\dynamic-neural-field-composer\build\release\examples\Release"  # dnfc exes (VS generator)
 
 # Cedar runtime DLL dirs (Qt, OpenCV, QGLViewer, GLEW, Boost, cedar\bin, + fftw3.dll dir).
 # A missing DLL => the exe silent-exits or errors 0xC0000135. Adjust each to this machine.
 $CEDAR_DLL_PATHS = @(
-  "C:\Qt\5.15.1\msvc2019_64\bin",
+  "C:\dev-files\Qt\5.15.0\msvc2019_64\bin",
   "C:\dev-files\opencv\opencv-build\bin\Release",
   "C:\dev-files\libQGLViewer\build\Release",
-  "C:\dev-files\glew-2.3.1\bin\Release\x64",
+  "C:\dev-files\glew-2.3.1-win32\glew-2.3.1\bin\Release\x64",
   "C:\dev-files\boost_1_82_0\lib64-msvc-14.3",
   $CEDAR,
   "C:\dev-files\vcpkg\installed\x64-windows\bin"    # fftw3.dll lives here (needed for the fftw variant)
 )
 
-$PY = "py -3.11"   # python launcher for cosivina-python (numba + nonumba)
+$PY = "python"   # python launcher for cosivina-python (numba + nonumba)
 # ====================================================================================
 
 $LOCK = Join-Path $PSScriptRoot "run_2d.lockd"
@@ -57,8 +57,8 @@ try {
       & "$DNFC\benchmark_headless_2d.exe" "$D2\timings-dnfc-2d.csv"  $a $NCSV $g
       & "$CEDAR\benchmark_2d.exe"         "$D2\timings-cedar-2d.csv" $a opencv $NCSV $g
       & "$CEDAR\benchmark_2d.exe"         "$D2\timings-cedar-2d.csv" $a fftw   $NCSV $g
-      & py -3.11 "$CPY2D" $a numba   $NCSV $g
-      & py -3.11 "$CPY2D" $a nonumba $NCSV $g
+      & python "$CPY2D" $a numba   $NCSV $g
+      & python "$CPY2D" $a nonumba $NCSV $g
     }
   }
   Write-Output "===== ALLDONE2D  ($(Get-Date)) ====="

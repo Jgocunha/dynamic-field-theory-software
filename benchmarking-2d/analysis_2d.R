@@ -94,7 +94,7 @@ for (a in archs_present) {
       select(fwv, N, label) %>%
       pivot_wider(names_from = N, values_from = label, names_prefix = "N=") %>%
       arrange(fwv)
-    cat("--- median steps/second (>=10 runs) ---\n")
+    cat("--- median steps/second (5 runs) ---\n")
     print(as.data.frame(wide))
 
     detail <- sub %>%

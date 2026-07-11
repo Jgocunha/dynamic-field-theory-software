@@ -34,7 +34,7 @@
                     "sigmas": ["3", "3"],
                     "normalize": "true",
                     "shifts": ["0", "0"],
-                    "limit": "10"
+                    "limit": "10.166666666666666"
                 }
             },
             "lateral kernel convolution": {

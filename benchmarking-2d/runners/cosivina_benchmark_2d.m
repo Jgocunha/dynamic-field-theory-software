@@ -57,16 +57,29 @@ fprintf('\nDone. Results appended to %s\n', OUTPUT_FILE);
 % ===========================================================================
 
 function run_arch(fid, archName, N_VALUES, gridSide, baseGrid, noiseAmp, WARMUP_STEPS, TIMED_STEPS, N_RUNS)
+    isMemory = strcmp(archName, 'memory');
     for ni = 1:length(N_VALUES)
         N = N_VALUES(ni);
         fprintf('=== Cosivina 2D  %s  grid=%dx%d  N=%d ===\n', archName, gridSide, gridSide, N);
 
-        sim = build_sim(N, archName, gridSide, baseGrid, noiseAmp);
+        [sim, stimHandles] = build_sim(N, archName, gridSide, baseGrid, noiseAmp);
         sim.init();
         for t = 1:WARMUP_STEPS; sim.step(); end
 
         for r = 1:N_RUNS
             sim.init();
+            % Two-phase memory protocol: sim.init() recomputes each stimulus's
+            % output from its (untouched) amplitude property, so the bump is
+            % always freshly established here; run 100 steps with it on, then
+            % zero output IN PLACE (zeroing .amplitude instead would not
+            % propagate, since GaussStimulus.output is only recomputed on
+            % init()) so the timed run measures self-sustained memory only.
+            if isMemory
+                for t = 1:100; sim.step(); end
+                for s = 1:numel(stimHandles)
+                    stimHandles{s}.output(:) = 0;
+                end
+            end
             t0 = tic;
             for t = 1:TIMED_STEPS; sim.step(); end
             elapsed = toc(t0);
@@ -77,7 +90,7 @@ function run_arch(fid, archName, N_VALUES, gridSide, baseGrid, noiseAmp, WARMUP_
     end
 end
 
-function sim = build_sim(N, archName, gridSide, baseGrid, noiseAmp)
+function [sim, stimHandles] = build_sim(N, archName, gridSide, baseGrid, noiseAmp)
     % Representative-sim parameters per architecture (validation sims
     % 001/021/041/081, 2D-adjusted). See generate_simulations_2d.py.
     fieldSize = [gridSide, gridSide];
@@ -102,6 +115,7 @@ function sim = build_sim(N, archName, gridSide, baseGrid, noiseAmp)
             error('Unknown arch: %s', archName);
     end
 
+    stimHandles = {};
     for i = 1:N
         suffix = num2str(i);
         name_n   = ['noise_' suffix];
@@ -114,9 +128,11 @@ function sim = build_sim(N, archName, gridSide, baseGrid, noiseAmp)
             name_s = ['stimulus_' suffix '_' num2str(s)];
             stim_names{s} = name_s;
             % GaussStimulus2D(name, size, sigmaY, sigmaX, amp, posY, posX, circY, circX, norm)
-            sim.addElement(GaussStimulus2D(name_s, fieldSize, ...
+            stimHandle = GaussStimulus2D(name_s, fieldSize, ...
                 stimuli(s,2), stimuli(s,2), stimuli(s,1), ...
-                stimuli(s,3) * pos_scale, stimuli(s,3) * pos_scale, true, true, false));
+                stimuli(s,3) * pos_scale, stimuli(s,3) * pos_scale, true, true, false);
+            sim.addElement(stimHandle);
+            stimHandles{end+1} = stimHandle; %#ok<AGROW>
         end
 
         sim.addElement(NormalNoise(name_n, fieldSize, noiseAmp));

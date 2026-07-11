@@ -34,7 +34,7 @@
                     "sigmas": ["3.4"],
                     "normalize": "true",
                     "shifts": ["0"],
-                    "limit": "10"
+                    "limit": "10.147058823529411"
                 },
                 "cedar.aux.kernel.Gauss": {
                     "dimensionality": "1",
@@ -43,7 +43,7 @@
                     "sigmas": ["8.5"],
                     "normalize": "true",
                     "shifts": ["0"],
-                    "limit": "10"
+                    "limit": "10.176470588235293"
                 }
             },
             "lateral kernel convolution": {

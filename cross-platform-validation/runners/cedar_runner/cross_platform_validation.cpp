@@ -21,6 +21,7 @@
 #include "cedar/processing/StepTime.h"
 #include "cedar/processing/DataConnection.h"
 #include "cedar/processing/DataSlot.h"
+#include "cedar/processing/Triggerable.h"
 #include "cedar/auxiliaries/GlobalClock.h"
 #include "cedar/processing/sources/GaussInput.h"
 #include "cedar/dynamics/fields/NeuralField.h"
@@ -107,6 +108,17 @@ static void run_phase(const cedar::dyn::NeuralFieldPtr& field)
     }
 }
 
+// True if the field's convolution engine threw during a step (e.g. FFTW's "kernel
+// size is too big for FFTW convolution" when the kernel is wider than the field).
+// A field stuck in this state does no real work — every further step is a no-op —
+// so the resulting CSV would be a meaningless frozen snapshot, not real dynamics.
+static bool in_exception_state(const cedar::dyn::NeuralFieldPtr& field)
+{
+    const auto st = field->getState();
+    return st == cedar::proc::Triggerable::STATE_EXCEPTION ||
+           st == cedar::proc::Triggerable::STATE_EXCEPTION_ON_START;
+}
+
 // Dump the loaded architecture (elements, parameters, connections) as JSON so
 // we can confirm readJson produced what we intended. Used in --dump mode.
 static void dump_architecture(const fs::path& json_path)
@@ -134,7 +146,7 @@ static void dump_architecture(const fs::path& json_path)
 // Per-simulation run
 // ---------------------------------------------------------------------------
 
-static void run_one(const fs::path& json_path, const fs::path& out_dir)
+static bool run_one(const fs::path& json_path, const fs::path& out_dir)
 {
     const std::string stem = json_path.stem().string(); // sim_NNN_act_fn
 
@@ -148,12 +160,23 @@ static void run_one(const fs::path& json_path, const fs::path& out_dir)
 
     // ── Phase 1: stimulus ON ──────────────────────────────────────────────
     run_phase(field);
+    if (in_exception_state(field)) {
+        std::cerr << "SKIP " << stem
+                   << " — field in exception state (kernel does not fit field?); no rows written\n";
+        return false;
+    }
     auto u_with = flatten_mat(field->getFieldActivation()->getData());
     save_csv(u_with, out_dir / (stem + "_with_stimulus.csv"));
 
     // ── Phase 2: stimulus OFF ─────────────────────────────────────────────
     for (auto& s : stimuli) s->setAmplitude(0.0);
     run_phase(field);
+    if (in_exception_state(field)) {
+        std::cerr << "SKIP " << stem
+                   << " (phase 2) — field in exception state; removing phase-1 output too\n";
+        std::error_code ec; fs::remove(out_dir / (stem + "_with_stimulus.csv"), ec);
+        return false;
+    }
     auto u_without = flatten_mat(field->getFieldActivation()->getData());
     save_csv(u_without, out_dir / (stem + "_without_stimulus.csv"));
 
@@ -162,6 +185,7 @@ static void run_one(const fs::path& json_path, const fs::path& out_dir)
     std::cout << "[OK]  " << stem
               << "  peak_with=" << peak_with
               << "  peak_without=" << peak_without << '\n';
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -202,11 +226,11 @@ int main(int argc, char* argv[])
 
     std::cout << "Found " << json_files.size() << " Cedar JSON files.\n";
 
-    int ok = 0, failed = 0;
+    int ok = 0, failed = 0, skipped = 0;
     for (const auto& json_path : json_files) {
         try {
-            run_one(json_path, out_dir);
-            ++ok;
+            if (run_one(json_path, out_dir)) ++ok;
+            else ++skipped;
         }
         catch (const std::exception& e) {
             std::cerr << "[ERR] " << json_path.stem().string() << ": " << e.what() << '\n';
@@ -214,6 +238,6 @@ int main(int argc, char* argv[])
         }
     }
 
-    std::cout << "\nDone: " << ok << " OK, " << failed << " failed.\n";
+    std::cout << "\nDone: " << ok << " OK, " << skipped << " skipped, " << failed << " failed.\n";
     return failed > 0 ? 1 : 0;
 }
