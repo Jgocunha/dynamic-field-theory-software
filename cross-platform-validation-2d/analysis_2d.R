@@ -469,7 +469,7 @@ by_type <- qual_check %>%
 print(as.data.frame(by_type[, c("type","pair","n","agree","pct")]), digits = 4)
 
 cat("\n  Interpretation:\n")
-cat("    All 100 simulations × 12 comparison pairs produce the same qualitative\n")
+cat("    All 100 simulations × 21 comparison pairs produce the same qualitative\n")
 cat("    field state (suprathreshold bump vs. subthreshold resting state) across\n")
 cat("    all six variants, confirming behavioural reliability.\n\n")
 

@@ -10,14 +10,14 @@
 
 | Property | Value |
 |---|---|
-| CPU | AMD Ryzen 5 3600 (6 cores / 12 threads, 3.6 GHz base) |
-| RAM | 32 GB DDR4 |
-| OS | Windows 11 Pro (build 10.0.22621), 64-bit |
+| CPU | 13th Gen Intel Core i9-13900 (24 cores / 32 threads) |
+| RAM | 32 GB |
+| OS | Windows 11 Pro (build 10.0.26200), 64-bit |
 | Compiler (Cedar / dnfc) | MSVC 19.44 (Visual Studio 2022 Community) |
-| MATLAB version | R2023a |
-| Python version | 3.11 |
+| MATLAB version | R2024b |
+| Python version | 3.11.9 |
 | dnfc version | 2.9.3 |
-| Cedar version | 6.1.0 |
+| Cedar version | 6.2.0 |
 | Cosivina version | 1.4.0 |
 | cosivina-python version | 0.1.0 (numba + nonumba paths) |
 | FFTW (Cedar-FFTW) | fftw3 via vcpkg (x64-windows); Cedar built with CEDAR_USE_FFTW=ON |
@@ -71,7 +71,11 @@ Three sigmoid variants are tested:
 |---|---|---|
 | AbsSigmoid (β=100) | σ(u) = ½(1 + β(u−θ)/(1+β abs(u−θ))) | Cedar, dnfc |
 | Heaviside (θ=0) | σ(u) = 1 if u > 0 else 0 | Cedar, dnfc |
-| Logistic sigmoid (β=100) | σ(u) = 1/(1+exp(−β(u−θ))) | Cosivina, dnfc |
+| Logistic sigmoid (β=100) | σ(u) = 1/(1+exp(−β(u−θ))) | Cedar (`cedar.aux.math.ExpSigmoid`, algebraically identical), Cosivina, cosivina-python, dnfc |
+
+Cedar's logistic-sigmoid variant is its own built-in `ExpSigmoid` class (not new code) — added so
+the suite has a working same-activation-function comparison against Cedar in all three families,
+not just AbsSigmoid/Heaviside.
 
 ### 2.5 Comparison Pairs
 
@@ -79,8 +83,9 @@ A quantitative algebraic-equivalence test (`max|Δu|` PASS/FAIL) is only meaning
 activation-function family** — comparing different operators (AbsSig vs Sigmoid, etc.) must differ by
 design, so cross-function differences are covered only by the behavioural (bump/no-bump) check
 (§3.2). Within each family, **every** C(n,2) variant pair is computed → 3 (AbsSig) + 3 (Heaviside) +
-6 (Sigmoid) = **12 pairs**. Any pair with a Cedar side carries a float32 ceiling (2×10⁻⁴); all-float64
-pairs carry a float64 ceiling (1×10⁻⁴).
+15 (Sigmoid, C(6,2) since Cedar now has a working logistic-sigmoid variant too) = **21 pairs**. Any
+pair with a Cedar side carries a float32 ceiling (2×10⁻⁴); all-float64 pairs carry a float64 ceiling
+(1×10⁻⁴).
 
 | Family | Pair | Expected precision |
 |---|---|---|
@@ -90,7 +95,16 @@ pairs carry a float64 ceiling (1×10⁻⁴).
 | **Heaviside** | cedar_opencv_vs_cedar_fftw | ~0 (same float32, OpenCV vs FFTW engine) |
 | | cedar_opencv_vs_dnfc | Float32 ceiling (~1×10⁻⁴) |
 | | cedar_fftw_vs_dnfc | Float32 ceiling (~1×10⁻⁴) |
-| **Sigmoid β=100** | cosivina_vs_cpy_numba | ~0 (~machine epsilon) |
+| **Sigmoid β=100** | cedar_opencv_vs_cedar_fftw | ~0 (same float32, OpenCV vs FFTW engine) |
+| | cedar_opencv_vs_dnfc | Float32 ceiling (~1×10⁻⁴) |
+| | cedar_fftw_vs_dnfc | Float32 ceiling (~1×10⁻⁴) |
+| | cedar_opencv_vs_cosivina | Float32 ceiling (~1×10⁻⁴) |
+| | cedar_opencv_vs_cpy_numba | Float32 ceiling (~1×10⁻⁴) |
+| | cedar_opencv_vs_cpy_nonumba | Float32 ceiling (~1×10⁻⁴) |
+| | cedar_fftw_vs_cosivina | Float32 ceiling (~1×10⁻⁴) |
+| | cedar_fftw_vs_cpy_numba | Float32 ceiling (~1×10⁻⁴) |
+| | cedar_fftw_vs_cpy_nonumba | Float32 ceiling (~1×10⁻⁴) |
+| | cosivina_vs_cpy_numba | ~0 (~machine epsilon) |
 | | cosivina_vs_cpy_nonumba | ~0 (~machine epsilon) |
 | | cosivina_vs_dnfc | Float64 accumulated error (<1×10⁻⁴) |
 | | cpy_numba_vs_cpy_nonumba | ~0 (same code path, JIT on/off) |
@@ -106,7 +120,7 @@ within-framework equivalence checks confirming a variant swap does not change th
 |---|---|---|---|---|
 | Float precision | float32 (CV_32F) | float64 | float64 | float64 |
 | Spatial convention | 0-based (output shifted +1 for comparison) | 1-based | 1-based | 1-based |
-| Kernel support | `limit = 10` (half-width = round_odd(limit × σ)) | `cutoffFactor = 5.0` | `cutoffFactor = 5.0` | `cutoffFactor = 5.0` |
+| Kernel support | `limit` computed per σ (`fair_cedar_limit`, matches the others' real tap count) | `cutoffFactor = 5.0` | `cutoffFactor = 5.0` | `cutoffFactor = 5.0` |
 | Kernel normalisation | Enabled | Enabled | Enabled | Enabled |
 | Field size | 100 | 100 | 100 | 100 |
 | Noise | 0 | 0 | 0 | 0 |
@@ -118,8 +132,8 @@ Generate all configs: `python generate_simulations.py`. The 6 variants live in e
 
 | Variant | `simulations/` | configs | `data/` CSVs (×2 phases) | runner |
 |---|---|---:|---:|---|
-| cedar-opencv | `cedar-opencv/` | 200 (2 act fns × 100) | 400 | `runners/cedar-opencv/run.ps1` |
-| cedar-fftw | `cedar-fftw/` | 200 | 400 | `runners/cedar-fftw/run.ps1` |
+| cedar-opencv | `cedar-opencv/` | 300 (3 act fns × 100) | 600 | `runners/cedar-opencv/run.ps1` |
+| cedar-fftw | `cedar-fftw/` | 300 | 600 | `runners/cedar-fftw/run.ps1` |
 | cosivina (MATLAB) | `cosivina/` | 100 | 200 | `runners/cosivina_runner.m` |
 | cosivina-python-numba | `cosivina-python/` * | 100 | 200 | `runners/cosivina-python-numba/run.ps1` |
 | cosivina-python-nonumba | `cosivina-python/` * | 100 | 200 | `runners/cosivina-python-nonumba/run.ps1` |
@@ -140,8 +154,8 @@ wrapper adds it.
 
 ### 3.1 Algebraic Equivalence (Same Activation Function Family)
 
-All **12** same-family comparison pairs **PASS** the algebraic equivalence criterion. Max abs(Δu) is
-over all 100 sims × 2 phases (200 comparisons per pair).
+All **21** same-family comparison pairs **PASS** the algebraic equivalence criterion (see
+`validation_summary.csv`). Max abs(Δu) is over all 100 sims × 2 phases (200 comparisons per pair).
 
 | Family | Pair | Max abs(Δu) | Median abs(Δu) | % within thr. | Threshold | Status |
 |---|---|---|---|---|---|---|
@@ -151,6 +165,15 @@ over all 100 sims × 2 phases (200 comparisons per pair).
 | Heaviside | cedar_opencv_vs_cedar_fftw | 1.00×10⁻⁴ | 0 | 100% | 2×10⁻⁴ | **PASS** |
 | Heaviside | cedar_opencv_vs_dnfc | 1.00×10⁻⁴ | 0 | 100% | 2×10⁻⁴ | **PASS** |
 | Heaviside | cedar_fftw_vs_dnfc | 1.00×10⁻⁴ | 0 | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cedar_opencv_vs_cedar_fftw | 1.00×10⁻⁴ | 0 | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cedar_opencv_vs_dnfc | 1.00×10⁻⁴ | 0 | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cedar_fftw_vs_dnfc | 1.00×10⁻⁴ | 0 | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cedar_opencv_vs_cosivina | 5.57×10⁻⁵ | 5.11×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cedar_opencv_vs_cpy_numba | 5.57×10⁻⁵ | 5.11×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cedar_opencv_vs_cpy_nonumba | 5.57×10⁻⁵ | 5.11×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cedar_fftw_vs_cosivina | 5.54×10⁻⁵ | 5.11×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cedar_fftw_vs_cpy_numba | 5.54×10⁻⁵ | 5.11×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cedar_fftw_vs_cpy_nonumba | 5.54×10⁻⁵ | 5.11×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
 | Sigmoid | cosivina_vs_cpy_numba | 9.95×10⁻¹⁴ | 0 | 100% | 1×10⁻⁴ | **PASS** |
 | Sigmoid | cosivina_vs_cpy_nonumba | 9.95×10⁻¹⁴ | 0 | 100% | 1×10⁻⁴ | **PASS** |
 | Sigmoid | cosivina_vs_dnfc | 5.00×10⁻⁵ | 4.89×10⁻⁶ | 100% | 1×10⁻⁴ | **PASS** |
@@ -161,14 +184,16 @@ over all 100 sims × 2 phases (200 comparisons per pair).
 **Interpretation:**
 
 - **Cedar OpenCV vs FFTW (engine equivalence):** the two convolution engines (spatial vs Fourier)
-  agree to the float32 ceiling (max 1×10⁻⁴, median 0) on every 1D architecture — the engine choice
-  does not change the result.
-- **Cedar vs dnfc (AbsSigmoid and Heaviside), both engines:** Cedar internally uses 32-bit
-  floating-point arithmetic (OpenCV `CV_32F`). Against dnfc's float64 computation of the same
-  equations, pointwise deviations are bounded by the float32 rounding-error ceiling (max 1×10⁻⁴,
-  median 0). The `cedar_fftw_vs_dnfc` rows match the `cedar_opencv_vs_dnfc` rows, confirming the
-  result is engine-independent. Deviations arise solely from arithmetic precision, not algorithmic
-  differences.
+  agree to the float32 ceiling (max 1×10⁻⁴, median 0) on every 1D architecture and every activation
+  function, including the added Sigmoid variant — the engine choice does not change the result.
+- **Cedar vs dnfc (all three families), both engines:** Cedar internally uses 32-bit floating-point
+  arithmetic (OpenCV `CV_32F`). Against dnfc's float64 computation of the same equations, pointwise
+  deviations are bounded by the float32 rounding-error ceiling (max ~1×10⁻⁴, median 0). The
+  `cedar_fftw_vs_dnfc` rows match the `cedar_opencv_vs_dnfc` rows, confirming the result is
+  engine-independent. Deviations arise solely from arithmetic precision, not algorithmic differences.
+- **Cedar Sigmoid vs the float64 frameworks (Cosivina / cosivina-python):** max deviation ~5.6×10⁻⁵,
+  the same float32 ceiling seen elsewhere, confirming Cedar's `ExpSigmoid` selection is algebraically
+  the same logistic sigmoid the other frameworks use.
 - **Sigmoid all-float64 pairs (Cosivina / cosivina-python / dnfc):** max deviation 5×10⁻⁵, reflecting
   accumulated rounding over 500 Euler steps under different computation orders (MATLAB vs C++ vs
   NumPy). The same-code-path cosivina-python **numba ↔ nonumba** and the cosivina ↔ cosivina-python
@@ -178,8 +203,8 @@ over all 100 sims × 2 phases (200 comparisons per pair).
 
 See `fig_boxplots.pdf` (per-pair deviation box plots by simulation type).
 
-**2400 / 2400 comparisons (100%) show qualitative agreement** across all simulation types, phases, and
-all 12 comparison pairs.
+**4200 / 4200 comparisons (100%) show qualitative agreement** across all simulation types, phases, and
+all 21 comparison pairs.
 
 For every simulation in the test suite, all six variants agree on whether the neural field is in a
 suprathreshold self-sustained state (peak activation > 0) or a subthreshold resting state (peak
