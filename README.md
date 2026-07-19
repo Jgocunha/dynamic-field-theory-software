@@ -44,14 +44,14 @@ kernel support and use matched activation functions (see `TRADE_OFF_CAVEATS.md` 
 
 | Framework (variant) | field=100 | field=500 |
 |---|---:|---:|
-| dnfc | 6 601–8 252 | 1 533–1 776 |
+| dnfc | 6 735–7 884 | 1 527–1 746 |
 | cosivina-python (numba) | 1 330–1 597 | 384–487 |
-| Cedar (FFTW) | 942–1 102 | 466–659 |
+| Cedar (FFTW) | 984–1 112 | 283–678 |
 | cosivina-python (NumPy) | 431–511 | 257–307 |
-| Cedar (OpenCV) | 195–657 | 71–241 |
-| Cosivina (MATLAB) | 170–252 | 105–171 |
+| Cedar (OpenCV) | 202–684 | 73–253 |
+| Cosivina (MATLAB) | 173–195 | 118–142 |
 
-**dnfc is by far the fastest** in every regime (32–39× Cosivina at field=100, 10–15× at field=500),
+**dnfc is by far the fastest** in every regime (38–44× Cosivina at field=100, 12–13× at field=500),
 with **numba-JIT cosivina-python second** at both field sizes. See
 [`benchmarking/README.md`](benchmarking/README.md) for the full per-regime breakdown, methodology,
 and statistical detail.
@@ -67,14 +67,14 @@ dominates each step. All six variants, all four regimes, both grid sizes.
 
 | Framework (variant) | grid=100 | grid=200 |
 |---|---:|---:|
-| dnfc | 41.5–62.0 | 10.6–15.7 |
-| Cosivina (MATLAB) | 16.4–38.7 | 5.3–12.6 |
-| Cedar (OpenCV) | 16.5–41.1 | 6.1–11.5 |
-| Cedar (FFTW) | 34.6–36.3 | 8.9–9.1 |
-| cosivina-python (numba) | 9.9–20.2 | 2.5–5.5 |
-| cosivina-python (NumPy) | 2.7–5.3 | 1.2–2.1 |
+| dnfc | 42.2–63.6 | 10.8–15.7 |
+| Cosivina (MATLAB) | 16.4–38.6 | 5.3–12.6 |
+| Cedar (OpenCV) | 16.5–43.2 | 6.2–11.6 |
+| Cedar (FFTW) | 35.3–37.0 | 8.9–9.2 |
+| cosivina-python (numba) | 9.8–20.2 | 2.5–5.5 |
+| cosivina-python (NumPy) | 2.7–5.3 | 1.1–2.1 |
 
-**dnfc wins every regime at both grids**, but narrowly (1.2–2.5×) compared to 1D — 2D's
+**dnfc wins every regime at both grids**, but narrowly (1.2–2.6×) compared to 1D — 2D's
 convolution-dominated step gives Cedar's and Cosivina's convolution paths much more room to
 compete. A genuinely surprising, investigated finding: **Cosivina (MATLAB) is competitive with, and
 sometimes beats, both Cedar engines** — traced to Cedar's general-framework overhead (locking,
