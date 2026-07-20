@@ -245,13 +245,24 @@ static void run_benchmark(int n, const Arch& arch, const std::string& variant,
         for (auto& f : fields) f->onTrigger(args, cedar::proc::TriggerPtr());
     };
 
-    if (arch.name == "memory") {
-        // Establish the bump with the stimulus on for 100 steps, then remove it —
-        // the warmup + timed measurement below covers genuine self-sustained memory
-        // maintenance, not stimulus-driven activity.
+    // Original stimulus amplitudes, captured so the memory arch can re-establish the
+    // bump before every timed run (the establish phase zeroes them).
+    std::vector<double> stimAmps;
+    for (auto& gi : stimuli) stimAmps.push_back(gi->getAmplitude());
+
+    auto reset_all = [&]() {
+        for (auto& f : fields) f->callReset();
+    };
+    // Establish the bump with the stimulus on for 100 steps, then remove it — so the
+    // timed measurement covers genuine self-sustained memory maintenance, not
+    // stimulus-driven activity.
+    auto establish_memory_bump = [&]() {
+        for (std::size_t k = 0; k < stimuli.size(); ++k) stimuli[k]->setAmplitude(stimAmps[k]);
         for (int t = 0; t < 100; ++t) step_all();
         for (auto& gi : stimuli) gi->setAmplitude(0.0);
-    }
+    };
+
+    if (arch.name == "memory") establish_memory_bump();
 
     // Warm-up
     for (int t = 0; t < WARMUP_STEPS; ++t) step_all();
@@ -276,6 +287,11 @@ static void run_benchmark(int n, const Arch& arch, const std::string& variant,
     if (!fp) { std::fprintf(stderr, "Cannot open %s\n", outfile.c_str()); return; }
 
     for (int run = 1; run <= N_RUNS; ++run) {
+        // Re-initialize to resting state before each timed run so runs 2..N do not
+        // continue from the evolved state of run 1 (mirrors dnfc / Cosivina, which
+        // call init() per run).
+        reset_all();
+        if (arch.name == "memory") establish_memory_bump();
         auto t0 = std::chrono::high_resolution_clock::now();
         for (int t = 0; t < TIMED_STEPS; ++t) step_all();
         auto t1 = std::chrono::high_resolution_clock::now();

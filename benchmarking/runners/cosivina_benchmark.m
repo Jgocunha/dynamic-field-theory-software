@@ -29,11 +29,12 @@ N_RUNS       = 5;
 NOISE_AMP    = 0.1;    % benchmark uses A>0 so the RNG cost is measured
 BASE_SIZE    = 100;    % reference grid the arch positions are defined on
 
-% Architecture x N x field-size matrix: 4 canonical archs, across N and field size.
-% Scoped to 'memory' only for the post-Tier-1 wrap-up re-run: detection/selection/
-% multi-peak rows are unaffected by the two-phase memory protocol and already valid
-% in timings-cosivina.csv. Restore the full list to re-run everything from scratch.
-ARCH_LIST    = {'memory'};
+% Architecture x N x field-size matrix: all 4 canonical archs, across N and field size.
+% Full fresh re-run of the entire 1D Cosivina suite in one idle sitting (memory uses the
+% two-phase protocol below). Empty timings-cosivina.csv before running so the fresh data
+% cleanly replaces everything. Run on a freshly-idle machine to avoid the thermal
+% turbo/throttle within-cell noise that affected the earlier piecemeal run.
+ARCH_LIST    = {'detection', 'selection', 'memory', 'multi-peak'};
 ARCH_N       = [5, 10, 50, 100];
 FIELD_SIZES  = [100, 500];
 

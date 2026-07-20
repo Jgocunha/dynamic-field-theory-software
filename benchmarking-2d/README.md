@@ -17,7 +17,7 @@ interpreted) scales differently with the number of grid points.
 | Compiler (Cedar / dnfc) | MSVC 19.44 (VS 2022), C++20, Release `/O2 /Ob2 /DNDEBUG`; dnfc `/arch:AVX2` |
 | MATLAB version | R2024b, `maxNumCompThreads(1)` |
 | Python version | 3.11.9; numpy 2.2.1; numba 0.66.0 |
-| dnfc version | 2.9.3 (cache-blocked separable convolution, AVX2 SIMD sigmoid, ILP-unrolled convolution, fused state-metrics) |
+| dnfc version | 2.9.3 (`/arch:AVX2`; cache-blocked, ILP-unrolled separable convolution, fused state-metrics; logistic sigmoid in float64) |
 | Cedar version | 6.2.0 — **both** convolution engines benchmarked: OpenCV (spatial) and FFTW (spectral); `cv::setNumThreads(0)` |
 | Cosivina version | 1.4.0 |
 | cosivina-python version | 0.1.0 (numba JIT and pure-NumPy paths both benchmarked) |
@@ -111,33 +111,34 @@ SD, and 95% CI.
 
 | Framework (variant) | det@100 | det@200 | sel@100 | sel@200 | mem@100 | mem@200 | mp@100 | mp@200 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| **dnfc** (C++, float64) | 62.0 | 15.7 | 58.5 | 14.7 | 41.5 | 10.6 | 60.7 | 15.6 |
-| Cosivina (MATLAB) | 36.7 | 11.8 | 33.8 | 9.3 | 16.4 | 5.3 | 38.7 | 12.6 |
-| Cedar (OpenCV, float32) | 38.9 | 10.9 | 41.1 | 11.1 | 16.5 | 6.1 | 41.0 | 11.5 |
-| Cedar (FFTW, float32) | 35.5 | 9.0 | 35.6 | 9.0 | 34.6 | 8.9 | 36.3 | 9.1 |
-| cosivina-python (numba) | 20.1 | 5.3 | 19.5 | 4.9 | 9.9 | 2.5 | 20.2 | 5.5 |
-| cosivina-python (NumPy) | 5.2 | 2.0 | 3.4 | 1.4 | 2.7 | 1.2 | 5.3 | 2.1 |
+| **dnfc** (C++, float64) | 63.6 | 15.7 | 60.4 | 14.9 | 42.2 | 10.8 | 61.9 | 15.7 |
+| Cosivina (MATLAB) | 36.7 | 11.8 | 33.8 | 9.3 | 16.4 | 5.3 | 38.6 | 12.6 |
+| Cedar (OpenCV, float32) | 41.0 | 11.1 | 43.2 | 11.3 | 16.5 | 6.2 | 42.5 | 11.6 |
+| Cedar (FFTW, float32) | 36.5 | 9.1 | 36.6 | 9.2 | 35.3 | 8.9 | 37.0 | 9.2 |
+| cosivina-python (numba) | 20.1 | 5.3 | 19.5 | 4.8 | 9.8 | 2.5 | 20.2 | 5.5 |
+| cosivina-python (NumPy) | 5.2 | 2.0 | 3.4 | 1.4 | 2.7 | 1.1 | 5.3 | 2.1 |
 
 ### Table 2 — Speedup relative to Cosivina (MATLAB), averaged across regimes at N=100
 
 | Framework (variant) | grid=100 | grid=200 |
 |---|---:|---:|
-| dnfc | 1.9× (1.6–2.5×) | 1.5× (1.2–2.0×) |
-| Cedar (FFTW) | 1.3× (0.9–2.1×) | 1.0× (0.7–1.7×) |
-| Cedar (OpenCV) | 1.1× (1.0–1.2×) | 1.0× (0.9–1.2×) |
+| dnfc | 1.9× (1.6–2.6×) | 1.6× (1.2–2.0×) |
+| Cedar (FFTW) | 1.3× (1.0–2.2×) | 1.0× (0.7–1.7×) |
+| Cedar (OpenCV) | 1.1× (1.0–1.3×) | 1.1× (0.9–1.2×) |
 | Cosivina (MATLAB) | 1.0× | 1.0× |
 | cosivina-python (numba) | 0.6× (0.5–0.6×) | 0.5× (0.4–0.5×) |
 | cosivina-python (NumPy) | 0.1× (0.1–0.2×) | 0.2× (0.2–0.2×) |
 
 ## Key observations
 
-- **dnfc wins every regime at both grids**, but by a much narrower margin than 1D (1.2–2.5× vs
-  32–39× at 1D field=100) — in 2D the lateral convolution dominates the step, and Cedar/Cosivina's
-  convolution paths (OpenCV `filter2D`, FFTW, MATLAB's FFT-based `conv2`) are competitive with
-  dnfc's cache-blocked separable convolution in a way that 1D's cheaper convolution never exposed.
+- **dnfc wins every regime at both grids**, but by a much narrower margin than 1D (1.2–2.6× vs
+  38–44× at 1D field=100) — in 2D the lateral convolution dominates the step, and Cedar/Cosivina's
+  convolution paths (OpenCV `filter2D`, FFTW spectral, MATLAB's separable spatial `conv2`) are
+  competitive with dnfc's cache-blocked separable convolution in a way that 1D's cheaper convolution
+  never exposed.
 
 - **Cosivina (MATLAB) is competitive with, and sometimes beats, both Cedar engines** — e.g.
-  `multi-peak@200`: Cosivina 12.6 sps vs Cedar-OpenCV 11.5 vs Cedar-FFTW 9.1. This was surprising
+  `multi-peak@200`: Cosivina 12.6 sps vs Cedar-OpenCV 11.6 vs Cedar-FFTW 9.2. This was surprising
   enough to investigate directly: it is not an artifact of the N=100 replication (the N=5→N=100
   scaling ratio is ~20–26× for every framework, matching the ideal linear-in-N ratio, so it isn't a
   per-instance-overhead effect), and it isn't a bug. Cedar is a general robotics/cognitive-
