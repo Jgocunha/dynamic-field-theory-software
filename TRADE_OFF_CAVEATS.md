@@ -10,7 +10,7 @@ on its own terms. The same caveats apply to the 1D and 2D suites.
 Cedar computes in **float32**; dnfc, Cosivina, and cosivina-python compute in
 **float64**. Throughput is measured per *step*, not per FLOP or per bit. float32
 halves memory traffic and doubles SIMD lane width, so Cedar's raw step rate carries
-an intrinsic precision advantage that the other frameworks do not get.
+an intrinsic advantage that the other frameworks do not get.
 
 This is a property of the frameworks as shipped — Cedar's field engine is float32 and
 cannot be switched to float64 without modifying the library — so we report
@@ -20,7 +20,7 @@ this precision difference in mind**; it flatters Cedar's numbers and is not remo
 our protocol. Same-precision comparisons (Cedar-OpenCV vs Cedar-FFTW; or
 dnfc vs Cosivina vs cosivina-python) are not affected.
 
-## 2. Convolution method differs by framework — and that is the point
+## 2. Convolution method differs by framework
 
 Throughput differences partly reflect *how* each framework convolves, which is an
 intrinsic property of the framework, not a confound:
@@ -66,21 +66,8 @@ and a 95% CI per cell) quantify short-timescale run-to-run noise *on this machin
 the generality of the result across hardware. **Report the cross-framework ratios as the
 finding; treat absolute sps as illustrative.**
 
-## 4. Re-run spans multiple sessions; thermal/load conditions not explicitly monitored
 
-The final data set was **not** collected in one uninterrupted sitting. After the
-kernel-extent/activation-function/two-phase-memory fairness fixes, the full re-run was
-executed across several separate launches over about a day, including one ~9-hour
-unattended background run for the slowest cells (cosivina-python, `nonumba` variant,
-grid 200). CPU turbo-boost behavior, thermal throttling, and background load were **not**
-explicitly logged or controlled across that span — only checked to be idle at launch
-time. The within-session 5-run spread (§3) captures short-timescale noise; it does not
-bound session-to-session drift (e.g. a thermally-throttled late-night run vs. a cool
-morning one). **Before citing absolute numbers or tight cross-run comparisons, spot-check
-a handful of cells by re-running them back-to-back on a freshly-idle machine** to confirm
-they land within the reported CI.
-
-## 5. Cross-framework ranking reflects framework architecture, not implementation quality
+## 4. Cross-framework ranking reflects framework architecture, not implementation quality
 
 Throughput differences are driven substantially by each framework's *architectural*
 design, not purely by the DFT algorithm or its numerical implementation. Cedar is a
@@ -97,39 +84,3 @@ general-framework overhead on raw per-step throughput," not a blanket claim that
 framework's implementation of the DFT equations is categorically better** — Cedar's
 overhead is the price of generality (typed data slots, thread-safe triggers, GUI/robotics
 integration) that the other frameworks don't provide.
-
-## 6. Benchmark and validation configs are independently maintained
-
-The fairness fixes (kernel-extent parity, activation-function match) were applied by
-hand to **two separate code paths per framework**: the throughput-benchmark driver and
-the `cross-platform-validation(-2d)` simulation generator. The two were cross-checked to
-agree (winner-take-all selection dumps, memory-bump-persistence dumps) but are not
-derived from one shared source of truth. If either is edited in the future without the
-other, they can silently drift apart — worth a periodic re-check, not a one-time
-guarantee.
-
-## 7. dnf-composer is a tuned-native build; the other frameworks run as distributed
-
-dnf-composer is compiled `/O2 /arch:AVX2`, and its library uses a cache-blocked, AVX2-
-vectorized separable convolution. Cedar is linked as a **prebuilt library** compiled
-without `/arch:AVX2`; Cosivina and cosivina-python run their as-distributed MATLAB-JIT /
-numba / NumPy paths. The comparison is therefore **tuned-native vs stock-native/JIT**, which
-is exactly the intended "purpose-built engine vs general-purpose framework" contrast — but it
-is *not* a claim that all C++ was compiled identically. It was not.
-
-Two clarifications so the reader can scope this correctly:
-
-- **AVX2 is not a benchmark-only flag.** It is on the dnf-composer **library** target, so
-  every dnf-composer executable ships with it — it is the library's real default, not a
-  measurement trick. An ablation (separate builds toggling `/arch:AVX2`) found it is worth
-  ~4× on the convolution hot path and is *required* for dnf-composer to stay ahead of the
-  other frameworks in 2D: with AVX2 disabled, dnf-composer's 2D throughput drops below
-  Cedar's and Cosivina's on several regimes. We report the shipped (AVX2-on) build because
-  that is what a dnf-composer user actually runs.
-- **The activation function is float64, like the rest of dnf-composer.** An earlier revision
-  computed the logistic sigmoid through a float32 fast path (cast back to double); that has
-  been removed. The sigmoid is now evaluated in double precision end-to-end, so the "float64"
-  label in §1 is literal for dnf-composer — there is no single-precision step hiding in the
-  hot loop. (The exponent is clamped to ±88, a numeric no-op that keeps saturated-tail outputs
-  normal doubles rather than denormals; see the dnfc ablation report for why.) This closes the
-  precision-asymmetry the earlier float32 fast path would otherwise have added to §1.

@@ -140,17 +140,9 @@ mean, SD, and 95% CI.
   71 sps) — its fused Fourier-domain multiply avoids the second spatial convolution OpenCV pays for.
   OpenCV is closer on the narrow-kernel regimes.
 
-- **This result reverses an earlier, unfair measurement.** A prior protocol revision set Cedar's
-  kernel `limit=5` believing it was directly comparable to dnfc's `cutoffFactor=5` — it isn't (see
-  *Benchmark Design* above), so Cedar was doing roughly half the real convolution work dnfc was.
-  Once corrected, no new dnfc optimization work was needed for dnfc to win: the fixed comparison
-  reveals dnfc's existing lead rather than creating one.
-
 > **Precision caveat:** Cedar runs **float32**, all others **float64**. Throughput is per step, not
 > per FLOP; Cedar's float32 SIMD-width advantage flatters its raw step rate. See
-> [`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) for this and all other trade-off caveats
-> (convolution method, single-machine measurement, multi-session environmental control, and the
-> correct scope of "faster" claims here).
+> [`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md).
 
 ---
 

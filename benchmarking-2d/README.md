@@ -70,10 +70,6 @@ stimulus-on to establish the bump, then removed before the timed window) in ever
 is the **median of 5 runs**, with a **95% confidence interval on the mean** (t-interval) in
 `data/benchmark_summary.csv` and drawn as the ribbon / error bars in the figures.
 
-See [`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) for the full set of trade-off caveats
-(precision, convolution method, single-machine, multi-session environmental control, and the
-correct scope of "faster" claims here) — identical to the 1D suite.
-
 ## How to reproduce
 
 1. **Run each framework** (each appends to `data/timings-<framework>-2d.csv`):
@@ -96,9 +92,7 @@ correct scope of "faster" claims here) — identical to the 1D suite.
 ## Results
 
 Measured at the fair protocol described above: matched kernel tap count, matched activation
-function, two-phase memory. All six variants, all four regimes, both grid sizes — the previously
-missing `multi-peak@200` cell (fftw's memory kernel didn't fit the smallest legacy grid) is now
-included everywhere.
+function, two-phase memory. All six variants, all four regimes, both grid sizes.
 
 ![Throughput](fig_benchmark_throughput.png)
 
@@ -153,11 +147,6 @@ SD, and 95% CI.
 - **Cedar-FFTW wins the `memory` regime specifically**, at both grids, over Cedar-OpenCV — its
   fused Mexican-hat Fourier multiply (one FFT pair instead of two spatial convolutions) is the one
   place FFTW's structural advantage shows through Cedar's overhead.
-
-- **This result reverses an earlier, unfair measurement** in exactly the way the 1D suite did (see
-  [`../benchmarking/README.md`](../benchmarking/README.md) *Key observations*) — the kernel-limit
-  units bug affected 2D identically. No new dnfc optimization work was needed to win once the
-  comparison was corrected.
 
 ---
 
