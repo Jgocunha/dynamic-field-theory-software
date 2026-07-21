@@ -14,13 +14,14 @@ interpreted) scales differently with the number of grid points.
 | RAM | 32 GB |
 | OS | Windows 11 Pro (build 10.0.26200), 64-bit |
 | Power plan | High performance |
-| Compiler (Cedar / dnfc) | MSVC 19.44 (VS 2022), C++20, Release `/O2 /Ob2 /DNDEBUG`; dnfc `/arch:AVX2` |
+| Compiler (Cedar / dnfc) | MSVC 19.44 (Visual Studio 2022 Community), C++20 |
+| Release flags | `/O2 /Ob2 /DNDEBUG` (CMake Release) |
 | MATLAB version | R2024b, `maxNumCompThreads(1)` |
 | Python version | 3.11.9; numpy 2.2.1; numba 0.66.0 |
-| dnfc version | 2.9.3 (`/arch:AVX2`; cache-blocked, ILP-unrolled separable convolution, fused state-metrics; logistic sigmoid in float64) |
+| dnfc version | 2.9.3 |
 | Cedar version | 6.2.0 — **both** convolution engines benchmarked: OpenCV (spatial) and FFTW (spectral); `cv::setNumThreads(0)` |
 | Cosivina version | 1.4.0 |
-| cosivina-python version | 0.1.0 (numba JIT and pure-NumPy paths both benchmarked) |
+| cosivina-python version | 0.1.0 (numba JIT, pure-NumPy, and spectral `KernelFFT` paths all benchmarked) |
 
 **Single-threading is enforced** the same way as the 1D study (Python thread-env pinned to 1 before
 numpy import; MATLAB `maxNumCompThreads(1)`; Cedar `cv::setNumThreads(0)`; dnfc is scalar C++).
@@ -36,11 +37,11 @@ Each run creates **N independent neural fields** (N ∈ {5, 10, 50, 100}), tiled
 **canonical DFT regime**, and times the integration loop — the same design as 1D, with each field
 promoted to a 2D grid. The matrix is fully crossed:
 
-**6 variants × 4 regimes × 2 grid sizes × 4 N × 5 runs.**
+**7 variants × 4 regimes × 2 grid sizes × 4 N × 5 runs.**
 
 | Axis | Values |
 |---|---|
-| Framework variants | dnfc · Cedar (OpenCV) · Cedar (FFTW) · Cosivina (MATLAB) · cosivina-python (numba) · cosivina-python (NumPy) |
+| Framework variants | dnfc · Cedar (OpenCV) · Cedar (FFTW) · Cosivina (MATLAB) · cosivina-python (numba) · cosivina-python (NumPy) · cosivina-python (FFT) |
 | Canonical regimes | detection · selection · memory · multi-peak |
 | Grid size (2D) | 100×100, 200×200 |
 | N (independent fields) | 5, 10, 50, 100 |
@@ -81,7 +82,7 @@ is the **median of 5 runs**, with a **95% confidence interval on the mean** (t-i
      on PATH (see `../.claude/reports/cedar-notes.md`).
    - cosivina (MATLAB): `run('runners/cosivina_benchmark_2d.m')` (edit `ARCH_LIST`/`GRID_SIZES` to
      scope a re-run; defaults to the full 4-regime × 2-grid matrix).
-   - cosivina-python: `python runners/cosivina_python_benchmark_2d.py <arch> <numba|nonumba> <N_csv> <grid>`.
+   - cosivina-python: `python runners/cosivina_python_benchmark_2d.py <arch> <numba|nonumba|fft> <N_csv> <grid>`.
    - `run_2d_benchmark.ps1` drives the full matrix for dnfc/Cedar/cosivina-python in one call (must
      run from PowerShell — the Cedar exes silent-exit under Git Bash).
 2. **Aggregate & plot**: `Rscript analysis_2d.R` → `data/benchmark_summary.csv`;
@@ -91,8 +92,8 @@ is the **median of 5 runs**, with a **95% confidence interval on the mean** (t-i
 
 ## Results
 
-Measured at the fair protocol described above: matched kernel tap count, matched activation
-function, two-phase memory. All six variants, all four regimes, both grid sizes.
+Measured at the protocol described above: matched kernel tap count, matched activation
+function, two-phase memory. All seven variants, all four regimes, both grid sizes.
 
 ![Throughput](fig_benchmark_throughput.png)
 
@@ -109,6 +110,7 @@ SD, and 95% CI.
 | Cosivina (MATLAB) | 36.7 | 11.8 | 33.8 | 9.3 | 16.4 | 5.3 | 38.6 | 12.6 |
 | Cedar (OpenCV, float32) | 41.0 | 11.1 | 43.2 | 11.3 | 16.5 | 6.2 | 42.5 | 11.6 |
 | Cedar (FFTW, float32) | 36.5 | 9.1 | 36.6 | 9.2 | 35.3 | 8.9 | 37.0 | 9.2 |
+| cosivina-python (FFT) | 25.1 | 6.6 | 25.8 | 6.7 | 25.5 | 6.8 | 25.9 | 6.8 |
 | cosivina-python (numba) | 20.1 | 5.3 | 19.5 | 4.8 | 9.8 | 2.5 | 20.2 | 5.5 |
 | cosivina-python (NumPy) | 5.2 | 2.0 | 3.4 | 1.4 | 2.7 | 1.1 | 5.3 | 2.1 |
 
@@ -120,6 +122,7 @@ SD, and 95% CI.
 | Cedar (FFTW) | 1.3× (1.0–2.2×) | 1.0× (0.7–1.7×) |
 | Cedar (OpenCV) | 1.1× (1.0–1.3×) | 1.1× (0.9–1.2×) |
 | Cosivina (MATLAB) | 1.0× | 1.0× |
+| cosivina-python (FFT) | 0.9× (0.7–1.6×) | 0.8× (0.5–1.3×) |
 | cosivina-python (numba) | 0.6× (0.5–0.6×) | 0.5× (0.4–0.5×) |
 | cosivina-python (NumPy) | 0.1× (0.1–0.2×) | 0.2× (0.2–0.2×) |
 
@@ -140,28 +143,40 @@ SD, and 95% CI.
   `Step::onTrigger` dispatch, `cv::copyMakeBorder` allocation for cyclic OpenCV convolution, a
   non-fused multi-pass Euler update) that MATLAB's comparatively lean cosivina loop does not, so a
   "slow, interpreted" MATLAB toolbox can beat a compiled C++ framework once that framework is
-  spending most of its time on generality rather than the convolution itself (see
-  `../.claude/reports/cedar-notes.md` for the source-level breakdown, and
-  [`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) §5 for how this bounds the "faster" claim).
+  spending most of its time on generality rather than the convolution itself.
 
-- **Cedar-FFTW wins the `memory` regime specifically**, at both grids, over Cedar-OpenCV — its
+- **Cedar-FFTW wins the `memory` regime specifically, at both grids, over Cedar-OpenCV** — its
   fused Mexican-hat Fourier multiply (one FFT pair instead of two spatial convolutions) is the one
   place FFTW's structural advantage shows through Cedar's overhead.
+
+- **cosivina-python (FFT) is the fastest of the three cosivina-python variants in 2D** — the reverse
+  of 1D, where it was the slowest. At grid 100 it runs ≈25 sps vs numba's 10–20 and NumPy's 3–5;
+  at grid 200, ≈6.7 vs 2.5–5.5 and 1.1–2.1. This is the spatial-vs-spectral crossover made visible
+  *within a single framework*: FFT convolution costs O(G²·log G) **independent of kernel width**,
+  while the spatial variants cost O(G²·taps). Two consequences show in the data: (1) FFT overtakes
+  the spatial variants once the field is 2D (the O(taps) term grows with the 2D kernel), and (2) FFT
+  is **flat across regimes** (25.1–25.9 at grid 100) while numba drops to 9.8 on the wide-kernel
+  **memory** regime — the spatial variants pay for the Mexican-hat's ~91-tap kernel, FFT does not.
+  The cross-platform-validation study confirms the FFT and spatial paths compute the same result, so
+  this is a pure algorithm-cost comparison. (It is still below dnfc and roughly on par with Cosivina
+  MATLAB.)
 
 ---
 
 ## Data provenance
 
-All six variants were measured on one machine (see *Test Machine* above); see
+All seven variants were measured on one machine (see *Test Machine* above); see
 [`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) §4 for the measurement's session structure and
 what that does and doesn't bound. Each `data/timings-*-2d.csv` row is
 `framework,variant,arch,field_size,mode,N,run,steps_per_second` (8 columns; `field_size` is the
 grid side length). Regenerate all tables and figures with `Rscript analysis_2d.R` and
-`Rscript fig_benchmark_2d.R`.
+`Rscript fig_benchmark_2d.R`. The cosivina-python-FFT rows were added in a later measurement session
+than the other variants; treat cross-variant *ratios* as the portable result (`TRADE_OFF_CAVEATS.md`
+§4).
 
 | Data file | Variants | Rows |
 |---|---|---:|
 | `data/timings-dnfc-2d.csv` | dnfc | 160 |
 | `data/timings-cedar-2d.csv` | OpenCV + FFTW | 320 |
-| `data/timings-cosivina-python-2d.csv` | numba + NumPy | 320 |
+| `data/timings-cosivina-python-2d.csv` | numba + NumPy + FFT | 480 |
 | `data/timings-cosivina-2d.csv` | Cosivina (MATLAB) | 160 |

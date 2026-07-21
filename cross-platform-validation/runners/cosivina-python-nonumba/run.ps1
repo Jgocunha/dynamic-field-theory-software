@@ -3,5 +3,5 @@
 
 $ErrorActionPreference = "Stop"
 $root = Resolve-Path "$PSScriptRoot\..\.."        # cross-platform-validation/
-py -3.11 "$root\runners\cosivina_python_runner.py" nonumba
+python "$root\runners\cosivina_python_runner.py" nonumba
 exit $LASTEXITCODE

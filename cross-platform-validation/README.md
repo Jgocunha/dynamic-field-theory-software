@@ -83,9 +83,16 @@ A quantitative algebraic-equivalence test (`max|Δu|` PASS/FAIL) is only meaning
 activation-function family** — comparing different operators (AbsSig vs Sigmoid, etc.) must differ by
 design, so cross-function differences are covered only by the behavioural (bump/no-bump) check
 (§3.2). Within each family, **every** C(n,2) variant pair is computed → 3 (AbsSig) + 3 (Heaviside) +
-15 (Sigmoid, C(6,2) since Cedar now has a working logistic-sigmoid variant too) = **21 pairs**. Any
-pair with a Cedar side carries a float32 ceiling (2×10⁻⁴); all-float64 pairs carry a float64 ceiling
-(1×10⁻⁴).
+21 (Sigmoid, C(7,2): Cedar's two engines, Cosivina, dnfc, and the three cosivina-python variants) =
+**27 pairs**. Any pair with a Cedar side carries a float32 ceiling (2×10⁻⁴); all-float64 pairs carry
+a float64 ceiling (1×10⁻⁴).
+
+The seventh variant, **cosivina-python-fft**, uses cosivina's spectral `KernelFFT` element (FFT
+convolution over the *full, untruncated* field) rather than the direct spatial convolution over the
+5σ-truncated kernel that every other variant uses. Its pairs against the other float64 variants
+therefore also probe the spectral-vs-truncated-spatial kernel difference; at field 100 the 5σ tail
+mass is negligible, so these pairs still sit well under the 1×10⁻⁴ float64 ceiling (measured ≤~5×10⁻⁵,
+i.e. the same order as the other float64 pairs).
 
 | Family | Pair | Expected precision |
 |---|---|---|
@@ -104,15 +111,24 @@ pair with a Cedar side carries a float32 ceiling (2×10⁻⁴); all-float64 pair
 | | cedar_fftw_vs_cosivina | Float32 ceiling (~1×10⁻⁴) |
 | | cedar_fftw_vs_cpy_numba | Float32 ceiling (~1×10⁻⁴) |
 | | cedar_fftw_vs_cpy_nonumba | Float32 ceiling (~1×10⁻⁴) |
+| | cedar_opencv_vs_cpy_fft | Float32 ceiling (~1×10⁻⁴) |
+| | cedar_fftw_vs_cpy_fft | Float32 ceiling (~1×10⁻⁴) |
 | | cosivina_vs_cpy_numba | ~0 (~machine epsilon) |
 | | cosivina_vs_cpy_nonumba | ~0 (~machine epsilon) |
+| | cosivina_vs_cpy_fft | Float64; spectral vs truncated-spatial kernel (<1×10⁻⁴) |
 | | cosivina_vs_dnfc | Float64 accumulated error (<1×10⁻⁴) |
 | | cpy_numba_vs_cpy_nonumba | ~0 (same code path, JIT on/off) |
+| | cpy_fft_vs_cpy_numba | Float64; spectral vs truncated-spatial kernel (<1×10⁻⁴) |
+| | cpy_fft_vs_cpy_nonumba | Float64; spectral vs truncated-spatial kernel (<1×10⁻⁴) |
+| | cpy_fft_vs_dnfc | Float64; spectral vs truncated-spatial kernel (<1×10⁻⁴) |
 | | cpy_numba_vs_dnfc | Float64 accumulated error (<1×10⁻⁴) |
 | | cpy_nonumba_vs_dnfc | Float64 accumulated error (<1×10⁻⁴) |
 
 The pairs spanning *engine* (cedar opencv↔fftw) or *backend* (cpy numba↔nonumba) variants are
-within-framework equivalence checks confirming a variant swap does not change the result.
+within-framework equivalence checks confirming a variant swap does not change the result. The
+`cpy_fft` pairs additionally cross a **spatial↔spectral convolution** boundary (see §2.5): they
+confirm that FFT convolution over the full field is numerically equivalent to direct spatial
+convolution over the 5σ-truncated kernel.
 
 ### 2.6 Implementation Constraints
 
@@ -128,7 +144,7 @@ within-framework equivalence checks confirming a variant swap does not change th
 
 ### 2.7 Folder layout & per-variant counts
 
-Generate all configs: `python generate_simulations.py`. The 6 variants live in explicit folders:
+Generate all configs: `python generate_simulations.py`. The 7 variants live in explicit folders:
 
 | Variant | `simulations/` | configs | `data/` CSVs (×2 phases) | runner |
 |---|---|---:|---:|---|
@@ -137,16 +153,60 @@ Generate all configs: `python generate_simulations.py`. The 6 variants live in e
 | cosivina (MATLAB) | `cosivina/` | 100 | 200 | `runners/cosivina_runner.m` |
 | cosivina-python-numba | `cosivina-python/` * | 100 | 200 | `runners/cosivina-python-numba/run.ps1` |
 | cosivina-python-nonumba | `cosivina-python/` * | 100 | 200 | `runners/cosivina-python-nonumba/run.ps1` |
+| cosivina-python-fft | `cosivina-python/` * | 100 | 200 | `runners/cosivina-python-fft/run.ps1` |
 | dnfc | `dnfc/` | 300 (3 act fns × 100) | 600 | `runners/dnfc/run.ps1` |
 
-\* The two cosivina-python variants **share one** `simulations/cosivina-python/` folder — the `.py`
-files are identical; the runner selects the `cosivina.numba` vs `cosivina.nonumba` backend (via the
-`COSIVINA_VARIANT` env var) and writes to its own `data/` folder. cedar splits into two sim folders
-because the convolution-engine string (`cedar.aux.conv.OpenCV` vs `…FFTW`) is baked into each JSON.
+\* The three cosivina-python variants **share one** `simulations/cosivina-python/` folder — the `.py`
+files are identical; the runner selects the backend/kernel via the `COSIVINA_VARIANT` env var
+(`numba` / `nonumba` use the spatial kernel element; `fft` uses the spectral `KernelFFT` element on
+the nonumba backend) and writes to its own `data/` folder. cedar splits into two sim folders because
+the convolution-engine string (`cedar.aux.conv.OpenCV` vs `…FFTW`) is baked into each JSON.
 
 **Cedar-FFTW prerequisites:** Cedar must be built with `CEDAR_USE_FFTW=ON` (fftw3 via vcpkg), and
 `…\vcpkg\installed\x64-windows\bin` (fftw3.dll) must be on PATH at runtime — the `cedar-fftw/run.ps1`
 wrapper adds it.
+
+### 2.8 How the test suite was generated
+
+The 100-simulation parameter table (`test_suite.md`) was produced with an LLM from the prompt
+below, then every emitted row was executed and its qualitative behaviour verified against the
+"distinguishing feature" of its type (§2.2) before the suite was frozen. The generator scripts
+(`generate_simulations.py`, `generate_simulations_2d.py`) encode exactly this table.
+
+> Design a validation suite of **100 dynamic-neural-field simulations** for cross-framework
+> algebraic-equivalence testing. Use a **1D field of size 100** with the Amari dynamics
+> `τ·du/dt = −u + h + w * σ(u) + S`, and hold these parameters fixed for every simulation:
+> `τ = Δt = 25 ms`, **no noise** (`A = 0`), **circular** boundaries, **normalized** kernels,
+> kernel support cutoff **5σ**, logistic-sigmoid gain **β = 100**. Run a **two-phase protocol**:
+> 500 steps with the stimulus ON, then 500 steps with all stimulus amplitudes set to zero, saving
+> the field at the end of each phase.
+>
+> Partition the 100 simulations into **five DFT phenomenon types, 20 each**, so that each type is
+> defined by the qualitative behaviour it must exhibit:
+> - **Detection (001–020):** one Gaussian stimulus + excitatory Gaussian kernel; the field must
+>   cross from sub- to suprathreshold.
+> - **Selection (021–040):** two stimuli + excitatory Gaussian kernel + global inhibition; exactly
+>   one location must win (winner-take-all).
+> - **Memory (041–060):** one stimulus + Mexican-hat (difference-of-Gaussians) kernel; a bump must
+>   self-sustain after the stimulus is removed.
+> - **Insufficient (061–080):** one weak stimulus/kernel; the field must stay subthreshold in both
+>   phases (the negative control).
+> - **Multi-peak (081–100):** two to three narrow stimuli, no global inhibition; multiple bumps
+>   must coexist.
+>
+> Within each type, make the **first row a canonical baseline** that clearly shows the behaviour,
+> then generate the remaining rows as a **one-parameter-at-a-time sweep** around that baseline —
+> vary the resting level `h`, each stimulus's amplitude / width / position, and the kernel's
+> amplitude / width (and global-inhibition strength where present) individually — followed by a
+> couple of **combined-perturbation rows** near the edge of the regime. Keep every value in a range
+> that preserves the type's defining behaviour.
+>
+> Emit the table with explicit per-ID parameters, and fan each simulation out across the
+> frameworks' activation functions: **logistic sigmoid** everywhere, plus **AbsSigmoid** and
+> **Heaviside** for the frameworks that support them (dnfc, Cedar).
+
+The 2D suite (`../cross-platform-validation-2d/test_suite_2d.md`) reuses this same 100-row table
+verbatim — only the embedding onto a 100×100 grid differs; see its README.
 
 ---
 
@@ -154,7 +214,7 @@ wrapper adds it.
 
 ### 3.1 Algebraic Equivalence (Same Activation Function Family)
 
-All **21** same-family comparison pairs **PASS** the algebraic equivalence criterion (see
+All **27** same-family comparison pairs **PASS** the algebraic equivalence criterion (see
 `validation_summary.csv`). Max abs(Δu) is over all 100 sims × 2 phases (200 comparisons per pair).
 
 | Family | Pair | Max abs(Δu) | Median abs(Δu) | % within thr. | Threshold | Status |
@@ -166,17 +226,23 @@ All **21** same-family comparison pairs **PASS** the algebraic equivalence crite
 | Heaviside | cedar_opencv_vs_dnfc | 1.00×10⁻⁴ | 0 | 100% | 2×10⁻⁴ | **PASS** |
 | Heaviside | cedar_fftw_vs_dnfc | 1.00×10⁻⁴ | 0 | 100% | 2×10⁻⁴ | **PASS** |
 | Sigmoid | cedar_opencv_vs_cedar_fftw | 1.00×10⁻⁴ | 0 | 100% | 2×10⁻⁴ | **PASS** |
-| Sigmoid | cedar_opencv_vs_dnfc | 1.00×10⁻⁴ | 0 | 100% | 2×10⁻⁴ | **PASS** |
-| Sigmoid | cedar_fftw_vs_dnfc | 1.00×10⁻⁴ | 0 | 100% | 2×10⁻⁴ | **PASS** |
 | Sigmoid | cedar_opencv_vs_cosivina | 5.57×10⁻⁵ | 5.11×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cedar_opencv_vs_cpy_fft | 5.32×10⁻⁵ | 5.26×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
 | Sigmoid | cedar_opencv_vs_cpy_numba | 5.57×10⁻⁵ | 5.11×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
 | Sigmoid | cedar_opencv_vs_cpy_nonumba | 5.57×10⁻⁵ | 5.11×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cedar_opencv_vs_dnfc | 1.00×10⁻⁴ | 0 | 100% | 2×10⁻⁴ | **PASS** |
 | Sigmoid | cedar_fftw_vs_cosivina | 5.54×10⁻⁵ | 5.11×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cedar_fftw_vs_cpy_fft | 5.28×10⁻⁵ | 5.34×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
 | Sigmoid | cedar_fftw_vs_cpy_numba | 5.54×10⁻⁵ | 5.11×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
 | Sigmoid | cedar_fftw_vs_cpy_nonumba | 5.54×10⁻⁵ | 5.11×10⁻⁶ | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cedar_fftw_vs_dnfc | 1.00×10⁻⁴ | 0 | 100% | 2×10⁻⁴ | **PASS** |
+| Sigmoid | cosivina_vs_cpy_fft | 4.70×10⁻⁶ | 0 | 100% | 1×10⁻⁴ | **PASS** |
 | Sigmoid | cosivina_vs_cpy_numba | 9.95×10⁻¹⁴ | 0 | 100% | 1×10⁻⁴ | **PASS** |
 | Sigmoid | cosivina_vs_cpy_nonumba | 9.95×10⁻¹⁴ | 0 | 100% | 1×10⁻⁴ | **PASS** |
 | Sigmoid | cosivina_vs_dnfc | 5.00×10⁻⁵ | 4.89×10⁻⁶ | 100% | 1×10⁻⁴ | **PASS** |
+| Sigmoid | cpy_fft_vs_cpy_numba | 4.70×10⁻⁶ | 0 | 100% | 1×10⁻⁴ | **PASS** |
+| Sigmoid | cpy_fft_vs_cpy_nonumba | 4.70×10⁻⁶ | 0 | 100% | 1×10⁻⁴ | **PASS** |
+| Sigmoid | cpy_fft_vs_dnfc | 5.25×10⁻⁵ | 4.98×10⁻⁶ | 100% | 1×10⁻⁴ | **PASS** |
 | Sigmoid | cpy_numba_vs_cpy_nonumba | 9.95×10⁻¹⁴ | 0 | 100% | 1×10⁻⁴ | **PASS** |
 | Sigmoid | cpy_numba_vs_dnfc | 5.00×10⁻⁵ | 4.89×10⁻⁶ | 100% | 1×10⁻⁴ | **PASS** |
 | Sigmoid | cpy_nonumba_vs_dnfc | 5.00×10⁻⁵ | 4.89×10⁻⁶ | 100% | 1×10⁻⁴ | **PASS** |
@@ -198,19 +264,36 @@ All **21** same-family comparison pairs **PASS** the algebraic equivalence crite
   accumulated rounding over 500 Euler steps under different computation orders (MATLAB vs C++ vs
   NumPy). The same-code-path cosivina-python **numba ↔ nonumba** and the cosivina ↔ cosivina-python
   pairs agree to ~1×10⁻¹⁴ (machine epsilon).
+- **Spectral cosivina-python-fft vs the spatial float64 variants:** the FFT variant convolves the
+  full untruncated kernel, the others a 5σ-truncated kernel. Against the other cosivina-family
+  variants the two paths agree to ~4.7×10⁻⁶ (the truncation tail at 5σ, field 100, is negligible),
+  and against dnfc to ~5.3×10⁻⁵ — i.e. the FFT and spatial convolutions are numerically equivalent,
+  so spatial-vs-spectral is not a confound in the cross-framework comparison.
+
+Worst-case deviation per pair × architecture type (annotated matrix; red border = FAIL):
+
+![Worst-case deviation per pair x architecture type](fig_deviation_summary.png)
 
 ### 3.2 Behavioural Reliability (Qualitative Agreement)
 
-See `fig_boxplots.pdf` (per-pair deviation box plots by simulation type).
+**5400 / 5400 comparisons (100%) show qualitative agreement** across all simulation types, phases, and
+all 27 comparison pairs.
 
-**4200 / 4200 comparisons (100%) show qualitative agreement** across all simulation types, phases, and
-all 21 comparison pairs.
-
-For every simulation in the test suite, all six variants agree on whether the neural field is in a
+For every simulation in the test suite, all seven variants agree on whether the neural field is in a
 suprathreshold self-sustained state (peak activation > 0) or a subthreshold resting state (peak
 activation ≤ 0). This holds for memory simulations in both phases (stimulus ON and OFF) and for
 selection simulations (winner-take-all competition outcome is identical). No simulation produces a
 qualitative discrepancy (bump in one variant, no bump in another).
+
+Per-pair deviation distributions by architecture type (log scale; dashed lines = precision-tier
+thresholds):
+
+![Pointwise deviation between frameworks](fig_boxplots.png)
+
+Representative activation profiles (one simulation per type, all framework/activation-function
+variants overlaid):
+
+![Representative activation profiles](fig_profiles_representative.png)
 
 ---
 

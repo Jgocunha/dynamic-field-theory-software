@@ -429,36 +429,64 @@ def build_cosivina_python_script_2d(sim: dict, output_dir: str) -> str:
     sid, stype, k = sim["id"], sim["type"], sim["kernel"]
     add_stim, sum_arg, set_zero, restore_stim = _python_2d_stimuli(sim)
 
+    # Spatial kernel block (numba / nonumba variants). Indented for the else branch.
     if k["type"] == "gauss" and k.get("amp_global", 0.0) == 0.0:
-        kernel_lines = (
-            f"    sim.addElement(\n"
-            f"        GaussKernel2D('u->u', FIELD_SIZE,\n"
-            f"                      sigmaY={k['sigma']}, sigmaX={k['sigma']}, amplitude={k['amp']},\n"
-            f"                      circularY=True, circularX=True, normalized=True),\n"
-            f"        inputLabels='field u', inputComponents='output',\n"
-            f"        targetLabels='field u')"
+        spatial_kernel_lines = (
+            f"        sim.addElement(\n"
+            f"            GaussKernel2D('u->u', FIELD_SIZE,\n"
+            f"                          sigmaY={k['sigma']}, sigmaX={k['sigma']}, amplitude={k['amp']},\n"
+            f"                          circularY=True, circularX=True, normalized=True),\n"
+            f"            inputLabels='field u', inputComponents='output',\n"
+            f"            targetLabels='field u')"
         )
     elif k["type"] == "gauss":
-        kernel_lines = (
-            f"    sim.addElement(\n"
-            f"        LateralInteractions2D('u->u', FIELD_SIZE,\n"
-            f"                              sigmaExcY={k['sigma']}, sigmaExcX={k['sigma']}, amplitudeExc={k['amp']},\n"
-            f"                              sigmaInhY=0.0, sigmaInhX=0.0, amplitudeInh=0.0,\n"
-            f"                              amplitudeGlobal={k['amp_global']},\n"
-            f"                              circularY=True, circularX=True, normalized=True),\n"
-            f"        inputLabels='field u', inputComponents='output',\n"
-            f"        targetLabels='field u')"
+        spatial_kernel_lines = (
+            f"        sim.addElement(\n"
+            f"            LateralInteractions2D('u->u', FIELD_SIZE,\n"
+            f"                                  sigmaExcY={k['sigma']}, sigmaExcX={k['sigma']}, amplitudeExc={k['amp']},\n"
+            f"                                  sigmaInhY=0.0, sigmaInhX=0.0, amplitudeInh=0.0,\n"
+            f"                                  amplitudeGlobal={k['amp_global']},\n"
+            f"                                  circularY=True, circularX=True, normalized=True),\n"
+            f"            inputLabels='field u', inputComponents='output',\n"
+            f"            targetLabels='field u')"
         )
     else:
-        kernel_lines = (
-            f"    sim.addElement(\n"
-            f"        LateralInteractions2D('u->u', FIELD_SIZE,\n"
-            f"                              sigmaExcY={k['sigma_exc']}, sigmaExcX={k['sigma_exc']}, amplitudeExc={k['amp_exc']},\n"
-            f"                              sigmaInhY={k['sigma_inh']}, sigmaInhX={k['sigma_inh']}, amplitudeInh={k['amp_inh']},\n"
-            f"                              amplitudeGlobal={k.get('amp_global', 0.0)},\n"
-            f"                              circularY=True, circularX=True, normalized=True),\n"
-            f"        inputLabels='field u', inputComponents='output',\n"
-            f"        targetLabels='field u')"
+        spatial_kernel_lines = (
+            f"        sim.addElement(\n"
+            f"            LateralInteractions2D('u->u', FIELD_SIZE,\n"
+            f"                                  sigmaExcY={k['sigma_exc']}, sigmaExcX={k['sigma_exc']}, amplitudeExc={k['amp_exc']},\n"
+            f"                                  sigmaInhY={k['sigma_inh']}, sigmaInhX={k['sigma_inh']}, amplitudeInh={k['amp_inh']},\n"
+            f"                                  amplitudeGlobal={k.get('amp_global', 0.0)},\n"
+            f"                                  circularY=True, circularX=True, normalized=True),\n"
+            f"            inputLabels='field u', inputComponents='output',\n"
+            f"            targetLabels='field u')"
+        )
+
+    # Spectral kernel block (fft variant). One KernelFFT element expresses all three
+    # kernel types via a difference-of-Gaussians + global term, convolved by FFT over
+    # the full (untruncated) field. 2D sigmas MUST be 2-element lists (KernelFFT.init
+    # indexes sigmaExc[1,0]/sigmaInh[1,0]), including sigmaInh even when amplitudeInh=0.
+    if k["type"] == "gauss":
+        fft_kernel_lines = (
+            f"        sim.addElement(\n"
+            f"            KernelFFT('u->u', FIELD_SIZE,\n"
+            f"                      sigmaExc=[{k['sigma']}, {k['sigma']}], amplitudeExc={k['amp']},\n"
+            f"                      sigmaInh=[1.0, 1.0], amplitudeInh=0.0,\n"
+            f"                      amplitudeGlobal={k.get('amp_global', 0.0)},\n"
+            f"                      circular=[True, True], normalized=True),\n"
+            f"            inputLabels='field u', inputComponents='output',\n"
+            f"            targetLabels='field u')"
+        )
+    else:
+        fft_kernel_lines = (
+            f"        sim.addElement(\n"
+            f"            KernelFFT('u->u', FIELD_SIZE,\n"
+            f"                      sigmaExc=[{k['sigma_exc']}, {k['sigma_exc']}], amplitudeExc={k['amp_exc']},\n"
+            f"                      sigmaInh=[{k['sigma_inh']}, {k['sigma_inh']}], amplitudeInh={k['amp_inh']},\n"
+            f"                      amplitudeGlobal={k.get('amp_global', 0.0)},\n"
+            f"                      circular=[True, True], normalized=True),\n"
+            f"            inputLabels='field u', inputComponents='output',\n"
+            f"            targetLabels='field u')"
         )
 
     out_dir_str = output_dir.replace("\\", "/")
@@ -475,16 +503,19 @@ if str(_COSIVINA_PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(_COSIVINA_PYTHON_ROOT))
 
 # Variant selected by the runner via the COSIVINA_VARIANT env var ("numba" |
-# "nonumba"); defaults to nonumba for standalone execution. The two variants share
-# this file — only the imported backend differs.
+# "nonumba" | "fft"); defaults to nonumba for standalone execution. All variants
+# share this file — the numba/nonumba variants use the spatial kernel element and
+# the matching backend; the fft variant uses the spectral KernelFFT element, which
+# has no numba path and so always runs on the nonumba backend.
 _variant = os.environ.get("COSIVINA_VARIANT", "nonumba")
 _mod = __import__(
     "cosivina.numba" if _variant == "numba" else "cosivina.nonumba",
     fromlist=["Simulator", "GaussStimulus2D", "SumInputs",
-              "NeuralField", "GaussKernel2D", "LateralInteractions2D"],
+              "NeuralField", "GaussKernel2D", "LateralInteractions2D", "KernelFFT"],
 )
 Simulator, GaussStimulus2D, SumInputs = _mod.Simulator, _mod.GaussStimulus2D, _mod.SumInputs
 NeuralField, GaussKernel2D, LateralInteractions2D = _mod.NeuralField, _mod.GaussKernel2D, _mod.LateralInteractions2D
+KernelFFT = _mod.KernelFFT
 
 FIELD_SIZE = ({FIELD}, {FIELD})
 TAU        = {TAU}
@@ -499,7 +530,10 @@ def run(output_dir: str = r"{out_dir_str}") -> None:
     sim.addElement(
         NeuralField("field u", FIELD_SIZE, tau=TAU, h={sim['h']}, beta=BETA),
         inputLabels="stimulus sum")
-{kernel_lines}
+    if _variant == "fft":
+{fft_kernel_lines}
+    else:
+{spatial_kernel_lines}
 
     os.makedirs(output_dir, exist_ok=True)
 

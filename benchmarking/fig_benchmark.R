@@ -75,11 +75,11 @@ summary_df <- timings %>%
 
 # ── Cosmetics ─────────────────────────────────────────────────────────────────
 
-# Six framework-variant series. Colour-blind-friendly palette (Wong 2011 + 2 hues):
-# the two Cedar variants share a warm family, the two cosivina-python variants a
-# pink/purple family, so opencv/fftw and numba/nonumba read as related pairs.
+# Seven framework-variant series. Colour-blind-friendly palette (Wong 2011 + hues):
+# the two Cedar variants share a warm family, the three cosivina-python variants a
+# pink/purple/magenta family, so opencv/fftw and numba/nonumba/fft read as related.
 fw_order  <- c("dnfc", "cedar", "cedar (fftw)", "cosivina",
-               "cosivina-python", "cosivina-python (nonumba)")
+               "cosivina-python", "cosivina-python (nonumba)", "cosivina-python (fft)")
 
 fw_labels <- c(
   "dnfc"                       = "dnfc (C++, float64)",
@@ -87,7 +87,8 @@ fw_labels <- c(
   "cedar (fftw)"               = "Cedar (C++, float32, FFTW)",
   "cosivina"                   = "Cosivina (MATLAB, float64)",
   "cosivina-python"            = "cosivina-python (numba)",
-  "cosivina-python (nonumba)"  = "cosivina-python (pure NumPy)"
+  "cosivina-python (nonumba)"  = "cosivina-python (pure NumPy)",
+  "cosivina-python (fft)"      = "cosivina-python (FFT, NumPy)"
 )
 
 fw_colors <- c(
@@ -96,7 +97,8 @@ fw_colors <- c(
   "cedar (fftw)"               = "#E69F00",   # orange (Cedar family)
   "cosivina"                   = "#009E73",   # green
   "cosivina-python"            = "#CC79A7",   # pink
-  "cosivina-python (nonumba)"  = "#7B3294"    # purple (cpy family)
+  "cosivina-python (nonumba)"  = "#7B3294",   # purple (cpy family)
+  "cosivina-python (fft)"      = "#882255"    # magenta (cpy family)
 )
 
 fw_shapes <- c(
@@ -105,7 +107,8 @@ fw_shapes <- c(
   "cedar (fftw)"               = 2,   # open triangle
   "cosivina"                   = 15,  # square
   "cosivina-python"            = 18,  # diamond
-  "cosivina-python (nonumba)"  = 5    # open diamond
+  "cosivina-python (nonumba)"  = 5,   # open diamond
+  "cosivina-python (fft)"      = 8    # asterisk (cpy family)
 )
 
 fw_lty <- c(
@@ -114,7 +117,8 @@ fw_lty <- c(
   "cedar (fftw)"               = "dashed",
   "cosivina"                   = "dashed",
   "cosivina-python"            = "dotted",
-  "cosivina-python (nonumba)"  = "dotdash"
+  "cosivina-python (nonumba)"  = "dotdash",
+  "cosivina-python (fft)"      = "longdash"
 )
 
 summary_df <- summary_df %>%

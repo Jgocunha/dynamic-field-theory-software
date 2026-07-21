@@ -1,7 +1,7 @@
 ﻿# run_1d_benchmark.ps1 — serial 1D benchmark driver (portable).
 #
 # Runs the full 1D matrix SERIALLY:
-#   6 variants (dnfc, cedar-opencv, cedar-fftw, cpy-numba, cpy-nonumba)
+#   7 variants (dnfc, cedar-opencv, cedar-fftw, cpy-numba, cpy-nonumba, cpy-fft)
 #   x 4 regimes (detection, selection, memory, multi-peak)
 #   x 2 field sizes (100, 500)
 #   x N {5,10,50,100} x 5 runs (2000 timed steps)   [cosivina MATLAB run separately]
@@ -51,6 +51,7 @@ try {
       & "$CEDAR\benchmark.exe"         "$D1\timings-cedar.csv"  $a fftw   $NCSV $fs
       & python "$CPY1D" $a numba   $NCSV $fs
       & python "$CPY1D" $a nonumba $NCSV $fs
+      & python "$CPY1D" $a fft     $NCSV $fs
     }
   }
   Write-Output "===== ALLDONE1D  ($(Get-Date)) ====="

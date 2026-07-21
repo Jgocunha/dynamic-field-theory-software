@@ -20,17 +20,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "cosivina_python"))
 
-# Variant selection: "numba" (JIT) or "nonumba" (pure NumPy). Chosen from argv in
-# main(); imported here as module globals so run_sim() can use the classes.
+# Variant selection: "numba" (JIT), "nonumba" (pure NumPy), or "fft" (spectral
+# KernelFFT element). Chosen from argv in main(); imported here as module globals
+# so run_sim() can use the classes. The fft variant uses cosivina's KernelFFT
+# element, which has no numba implementation, so it runs on the nonumba backend.
 VARIANT = sys.argv[1] if len(sys.argv) > 1 else "nonumba"
-if VARIANT not in ("numba", "nonumba"):
+if VARIANT not in ("numba", "nonumba", "fft"):
     print(f"Unknown variant '{VARIANT}'; defaulting to nonumba")
     VARIANT = "nonumba"
 
 _mod = __import__(
     "cosivina.numba" if VARIANT == "numba" else "cosivina.nonumba",
     fromlist=["Simulator", "GaussStimulus1D", "SumInputs",
-              "NeuralField", "GaussKernel1D", "LateralInteractions1D"],
+              "NeuralField", "GaussKernel1D", "LateralInteractions1D", "KernelFFT"],
 )
 Simulator            = _mod.Simulator
 GaussStimulus1D      = _mod.GaussStimulus1D
@@ -38,6 +40,7 @@ SumInputs            = _mod.SumInputs
 NeuralField          = _mod.NeuralField
 GaussKernel1D        = _mod.GaussKernel1D
 LateralInteractions1D = _mod.LateralInteractions1D
+KernelFFT            = _mod.KernelFFT
 
 # ---------------------------------------------------------------------------
 # Parameter table (matches generate_simulations.py exactly)
@@ -235,7 +238,37 @@ def build_sim(sim_params: dict) -> tuple:
     )
 
     # Lateral kernel
-    if k["type"] == "gauss" and k.get("amp_global", 0.0) == 0.0:
+    if VARIANT == "fft":
+        # Spectral KernelFFT element: one difference-of-Gaussians + global kernel,
+        # convolved via FFT over the full field (untruncated). Expresses all three
+        # kernel types: gauss (amplitudeInh=0), gauss+global (selection),
+        # mexican_hat (both Gaussian components).
+        if k["type"] == "gauss":
+            sim.addElement(
+                KernelFFT("u->u", FIELD_SIZE,
+                          sigmaExc=float(k["sigma"]),
+                          amplitudeExc=float(k["amp"]),
+                          amplitudeInh=0.0,
+                          amplitudeGlobal=float(k.get("amp_global", 0.0)),
+                          circular=True,
+                          normalized=True),
+                inputLabels="field u", inputComponents="output",
+                targetLabels="field u"
+            )
+        else:
+            sim.addElement(
+                KernelFFT("u->u", FIELD_SIZE,
+                          sigmaExc=float(k["sigma_exc"]),
+                          amplitudeExc=float(k["amp_exc"]),
+                          sigmaInh=float(k["sigma_inh"]),
+                          amplitudeInh=float(k["amp_inh"]),
+                          amplitudeGlobal=0.0,
+                          circular=True,
+                          normalized=True),
+                inputLabels="field u", inputComponents="output",
+                targetLabels="field u"
+            )
+    elif k["type"] == "gauss" and k.get("amp_global", 0.0) == 0.0:
         sim.addElement(
             GaussKernel1D("u->u", FIELD_SIZE,
                           sigma=float(k["sigma"]),

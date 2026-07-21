@@ -39,14 +39,15 @@ def load_cosivina(variant: str):
     """Import the cosivina element classes from the chosen variant module
     (`numba` JIT path or `nonumba` pure-Python/NumPy path) and bind them as
     module globals so create_sim() can use them. Explicit selection — NOT a
-    silent fallback — so the two paths are measured as distinct variants."""
+    silent fallback — so the paths are measured as distinct variants. The `fft`
+    variant uses the spectral KernelFFT element (no numba path) on the nonumba
+    backend."""
     module = "cosivina.numba" if variant == "numba" else "cosivina.nonumba"
-    mod = __import__(module, fromlist=[
-        "Simulator", "GaussStimulus1D", "NormalNoise",
-        "SumInputs", "NeuralField", "GaussKernel1D", "LateralInteractions1D",
-    ])
-    for name in ("Simulator", "GaussStimulus1D", "NormalNoise",
-                 "SumInputs", "NeuralField", "GaussKernel1D", "LateralInteractions1D"):
+    names = ["Simulator", "GaussStimulus1D", "NormalNoise",
+             "SumInputs", "NeuralField", "GaussKernel1D", "LateralInteractions1D",
+             "KernelFFT"]
+    mod = __import__(module, fromlist=names)
+    for name in names:
         globals()[name] = getattr(mod, name)
 
 
@@ -77,7 +78,7 @@ ARCHS = {
 }
 
 
-def create_sim(n: int, arch: dict, field_size: int):
+def create_sim(n: int, arch: dict, field_size: int, variant: str = "numba"):
     """Build a Simulator with `n` independent fields of the given architecture."""
     fs = (1, field_size)
     pos_scale = field_size / BASE_SIZE
@@ -101,7 +102,24 @@ def create_sim(n: int, arch: dict, field_size: int):
                        inputLabels=name_sum)
 
         k = arch["kernel"]
-        if k[0] == "gauss" and k[3] == 0.0:
+        if variant == "fft":
+            # Spectral KernelFFT element: full-field (untruncated) FFT convolution.
+            if k[0] == "gauss":
+                sim.addElement(KernelFFT(name_k, fs,
+                                         sigmaExc=k[1], amplitudeExc=k[2],
+                                         amplitudeInh=0.0, amplitudeGlobal=k[3],
+                                         circular=True, normalized=True),
+                               inputLabels=name_f, inputComponents="output",
+                               targetLabels=name_f)
+            else:  # mexican_hat
+                sim.addElement(KernelFFT(name_k, fs,
+                                         sigmaExc=k[1], amplitudeExc=k[2],
+                                         sigmaInh=k[3], amplitudeInh=k[4],
+                                         amplitudeGlobal=0.0,
+                                         circular=True, normalized=True),
+                               inputLabels=name_f, inputComponents="output",
+                               targetLabels=name_f)
+        elif k[0] == "gauss" and k[3] == 0.0:
             sim.addElement(GaussKernel1D(name_k, fs,
                                          sigma=k[1], amplitude=k[2],
                                          circular=True, normalized=True),
@@ -156,7 +174,7 @@ def main():
         arch_name = "detection"
     arch = ARCHS[arch_name]
     variant = sys.argv[2] if len(sys.argv) > 2 else "numba"
-    if variant not in ("numba", "nonumba"):
+    if variant not in ("numba", "nonumba", "fft"):
         print(f"Unknown variant '{variant}'; defaulting to numba")
         variant = "numba"
     n_values = ([int(x) for x in sys.argv[3].split(",") if x]
@@ -183,7 +201,7 @@ def main():
         for n in n_values:
             print(f"=== cosivina-python/{variant}  {arch_name}  fs={field_size}  N={n} ===")
 
-            sim = create_sim(n, arch, field_size)
+            sim = create_sim(n, arch, field_size, variant)
 
             stimuli = []
             if arch_name == "memory":
