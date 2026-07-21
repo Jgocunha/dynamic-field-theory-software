@@ -11,16 +11,19 @@ if str(_COSIVINA_PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(_COSIVINA_PYTHON_ROOT))
 
 # Variant selected by the runner via the COSIVINA_VARIANT env var ("numba" |
-# "nonumba"); defaults to nonumba for standalone execution. The two variants share
-# this file — only the imported backend differs.
+# "nonumba" | "fft"); defaults to nonumba for standalone execution. All variants
+# share this file — the numba/nonumba variants use the spatial kernel element and
+# the matching backend; the fft variant uses the spectral KernelFFT element, which
+# has no numba path and so always runs on the nonumba backend.
 _variant = os.environ.get("COSIVINA_VARIANT", "nonumba")
 _mod = __import__(
     "cosivina.numba" if _variant == "numba" else "cosivina.nonumba",
     fromlist=["Simulator", "GaussStimulus2D", "SumInputs",
-              "NeuralField", "GaussKernel2D", "LateralInteractions2D"],
+              "NeuralField", "GaussKernel2D", "LateralInteractions2D", "KernelFFT"],
 )
 Simulator, GaussStimulus2D, SumInputs = _mod.Simulator, _mod.GaussStimulus2D, _mod.SumInputs
 NeuralField, GaussKernel2D, LateralInteractions2D = _mod.NeuralField, _mod.GaussKernel2D, _mod.LateralInteractions2D
+KernelFFT = _mod.KernelFFT
 
 FIELD_SIZE = (50, 50)
 TAU        = 25.0
@@ -39,12 +42,22 @@ def run(output_dir: str = r"C:/dev-files/dynamic-field-theory-software/cross-pla
     sim.addElement(
         NeuralField("field u", FIELD_SIZE, tau=TAU, h=-12.0, beta=BETA),
         inputLabels="stimulus sum")
-    sim.addElement(
-        GaussKernel2D('u->u', FIELD_SIZE,
-                      sigmaY=3, sigmaX=3, amplitude=4.0,
-                      circularY=True, circularX=True, normalized=True),
-        inputLabels='field u', inputComponents='output',
-        targetLabels='field u')
+    if _variant == "fft":
+        sim.addElement(
+            KernelFFT('u->u', FIELD_SIZE,
+                      sigmaExc=[3, 3], amplitudeExc=4.0,
+                      sigmaInh=[1.0, 1.0], amplitudeInh=0.0,
+                      amplitudeGlobal=0.0,
+                      circular=[True, True], normalized=True),
+            inputLabels='field u', inputComponents='output',
+            targetLabels='field u')
+    else:
+        sim.addElement(
+            GaussKernel2D('u->u', FIELD_SIZE,
+                          sigmaY=3, sigmaX=3, amplitude=4.0,
+                          circularY=True, circularX=True, normalized=True),
+            inputLabels='field u', inputComponents='output',
+            targetLabels='field u')
 
     os.makedirs(output_dir, exist_ok=True)
 

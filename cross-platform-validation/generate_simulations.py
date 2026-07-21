@@ -724,36 +724,62 @@ def build_cosivina_python_script(sim: dict, output_dir: str) -> str:
     add_stim, sum_arg, set_zero = _python_stimuli_block(sim)
     restore_stim = _python_restore_stim(sim)
 
+    # Spatial kernel block (numba / nonumba variants). Indented for the else branch.
     if k["type"] == "gauss" and k.get("amp_global", 0.0) == 0.0:
-        kernel_lines = (
-            f"    sim.addElement(\n"
-            f"        GaussKernel1D('u->u', FIELD_SIZE,\n"
-            f"                      sigma={k['sigma']}, amplitude={k['amp']},\n"
-            f"                      circular=True, normalized=True),\n"
-            f"        inputLabels='field u', inputComponents='output',\n"
-            f"        targetLabels='field u')"
+        spatial_kernel_lines = (
+            f"        sim.addElement(\n"
+            f"            GaussKernel1D('u->u', FIELD_SIZE,\n"
+            f"                          sigma={k['sigma']}, amplitude={k['amp']},\n"
+            f"                          circular=True, normalized=True),\n"
+            f"            inputLabels='field u', inputComponents='output',\n"
+            f"            targetLabels='field u')"
         )
     elif k["type"] == "gauss":
-        kernel_lines = (
-            f"    sim.addElement(\n"
-            f"        LateralInteractions1D('u->u', FIELD_SIZE,\n"
-            f"                              sigmaExc={k['sigma']}, amplitudeExc={k['amp']},\n"
-            f"                              sigmaInh=0.0, amplitudeInh=0.0,\n"
-            f"                              amplitudeGlobal={k['amp_global']},\n"
-            f"                              circular=True, normalized=True),\n"
-            f"        inputLabels='field u', inputComponents='output',\n"
-            f"        targetLabels='field u')"
+        spatial_kernel_lines = (
+            f"        sim.addElement(\n"
+            f"            LateralInteractions1D('u->u', FIELD_SIZE,\n"
+            f"                                  sigmaExc={k['sigma']}, amplitudeExc={k['amp']},\n"
+            f"                                  sigmaInh=0.0, amplitudeInh=0.0,\n"
+            f"                                  amplitudeGlobal={k['amp_global']},\n"
+            f"                                  circular=True, normalized=True),\n"
+            f"            inputLabels='field u', inputComponents='output',\n"
+            f"            targetLabels='field u')"
         )
     else:
-        kernel_lines = (
-            f"    sim.addElement(\n"
-            f"        LateralInteractions1D('u->u', FIELD_SIZE,\n"
-            f"                              sigmaExc={k['sigma_exc']}, amplitudeExc={k['amp_exc']},\n"
-            f"                              sigmaInh={k['sigma_inh']}, amplitudeInh={k['amp_inh']},\n"
-            f"                              amplitudeGlobal=0.0,\n"
-            f"                              circular=True, normalized=True),\n"
-            f"        inputLabels='field u', inputComponents='output',\n"
-            f"        targetLabels='field u')"
+        spatial_kernel_lines = (
+            f"        sim.addElement(\n"
+            f"            LateralInteractions1D('u->u', FIELD_SIZE,\n"
+            f"                                  sigmaExc={k['sigma_exc']}, amplitudeExc={k['amp_exc']},\n"
+            f"                                  sigmaInh={k['sigma_inh']}, amplitudeInh={k['amp_inh']},\n"
+            f"                                  amplitudeGlobal=0.0,\n"
+            f"                                  circular=True, normalized=True),\n"
+            f"            inputLabels='field u', inputComponents='output',\n"
+            f"            targetLabels='field u')"
+        )
+
+    # Spectral kernel block (fft variant). One KernelFFT element expresses all three
+    # kernel types via a difference-of-Gaussians + global term, convolved by FFT over
+    # the full (untruncated) field.
+    if k["type"] == "gauss":
+        fft_kernel_lines = (
+            f"        sim.addElement(\n"
+            f"            KernelFFT('u->u', FIELD_SIZE,\n"
+            f"                      sigmaExc={k['sigma']}, amplitudeExc={k['amp']},\n"
+            f"                      amplitudeInh=0.0, amplitudeGlobal={k.get('amp_global', 0.0)},\n"
+            f"                      circular=True, normalized=True),\n"
+            f"            inputLabels='field u', inputComponents='output',\n"
+            f"            targetLabels='field u')"
+        )
+    else:
+        fft_kernel_lines = (
+            f"        sim.addElement(\n"
+            f"            KernelFFT('u->u', FIELD_SIZE,\n"
+            f"                      sigmaExc={k['sigma_exc']}, amplitudeExc={k['amp_exc']},\n"
+            f"                      sigmaInh={k['sigma_inh']}, amplitudeInh={k['amp_inh']},\n"
+            f"                      amplitudeGlobal=0.0,\n"
+            f"                      circular=True, normalized=True),\n"
+            f"            inputLabels='field u', inputComponents='output',\n"
+            f"            targetLabels='field u')"
         )
 
     out_dir_str = output_dir.replace("\\", "/")
@@ -773,15 +799,18 @@ if str(_COSIVINA_PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(_COSIVINA_PYTHON_ROOT))
 
 # Variant selected by the runner via the COSIVINA_VARIANT env var ("numba" |
-# "nonumba"); defaults to nonumba. The two variants share this file.
+# "nonumba" | "fft"); defaults to nonumba. All variants share this file. The
+# numba/nonumba variants use the spatial kernel element; the fft variant uses the
+# spectral KernelFFT element, which has no numba path (always nonumba backend).
 _variant = os.environ.get("COSIVINA_VARIANT", "nonumba")
 _mod = __import__(
     "cosivina.numba" if _variant == "numba" else "cosivina.nonumba",
     fromlist=["Simulator", "GaussStimulus1D", "SumInputs",
-              "NeuralField", "GaussKernel1D", "LateralInteractions1D"],
+              "NeuralField", "GaussKernel1D", "LateralInteractions1D", "KernelFFT"],
 )
 Simulator, GaussStimulus1D, SumInputs = _mod.Simulator, _mod.GaussStimulus1D, _mod.SumInputs
 NeuralField, GaussKernel1D, LateralInteractions1D = _mod.NeuralField, _mod.GaussKernel1D, _mod.LateralInteractions1D
+KernelFFT = _mod.KernelFFT
 
 FIELD_SIZE = (1, 100)
 TAU        = 25.0
@@ -796,7 +825,10 @@ def run(output_dir: str = r"{out_dir_str}") -> None:
     sim.addElement(
         NeuralField("field u", FIELD_SIZE, tau=TAU, h={sim['h']}, beta=BETA),
         inputLabels="stimulus sum")
-{kernel_lines}
+    if _variant == "fft":
+{fft_kernel_lines}
+    else:
+{spatial_kernel_lines}
 
     os.makedirs(output_dir, exist_ok=True)
 

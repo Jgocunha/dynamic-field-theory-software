@@ -15,10 +15,12 @@ import os
 import sys
 from pathlib import Path
 
-# Variant ("numba" | "nonumba") chosen from argv; set BEFORE loading sim modules so
-# the shared sim_*.py import the matching cosivina backend (they read COSIVINA_VARIANT).
+# Variant ("numba" | "nonumba" | "fft") chosen from argv; set BEFORE loading sim
+# modules so the shared sim_*.py import the matching cosivina backend and kernel
+# element (they read COSIVINA_VARIANT). The fft variant uses the spectral KernelFFT
+# element (NumPy-only, no numba path).
 VARIANT = sys.argv[1] if len(sys.argv) > 1 else "nonumba"
-if VARIANT not in ("numba", "nonumba"):
+if VARIANT not in ("numba", "nonumba", "fft"):
     print(f"Unknown variant '{VARIANT}'; defaulting to nonumba")
     VARIANT = "nonumba"
 os.environ["COSIVINA_VARIANT"] = VARIANT

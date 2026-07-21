@@ -33,27 +33,33 @@ intrinsic property of the framework, not a confound:
 | Cosivina (MATLAB)        | Direct spatial convolution (`conv2`, separable in 2D) |
 | cosivina-python (numba)  | Direct spatial convolution (`np.convolve` / `parCircConv`), numba-JIT host code |
 | cosivina-python (nonumba)| Direct spatial convolution (`np.convolve` / `parCircConv`), pure NumPy |
+| cosivina-python (fft)    | Spectral: `KernelFFT` element, `rfft2(input) × rfft2(kernel)` → inverse FFT (cyclic, full untruncated kernel), pure NumPy |
 
-**Five of the six variants convolve spatially with a truncated kernel; only Cedar-FFTW is
-spectral.** (cosivina-python ships a spectral `KernelFFT` element, but the benchmark and
-validation runners never instantiate it — they use `GaussKernel*` / `LateralInteractions*`,
-which are spatial.) These are reported as a framework characteristic, not normalized away.
-Two important structural facts follow:
+**Five of the seven variants convolve spatially with a truncated kernel; two are spectral —
+Cedar-FFTW (float32) and cosivina-python-fft (float64).** The cosivina-python-fft variant
+instantiates cosivina's spectral `KernelFFT` element; the numba/nonumba variants use the spatial
+`GaussKernel*` / `LateralInteractions*` elements. These are reported as a framework characteristic,
+not normalized away. Two important structural facts follow:
 
-- **The one spatial-vs-spectral cross-over is Cedar-FFTW vs everyone else.** Direct
-  convolution cost grows with (kernel width × field size); spectral cost grows with
-  (field size × log field size) independent of kernel width. So Cedar-FFTW pulls ahead on
-  convolution-heavy regimes (wide Mexican-hat) and large fields, while the five spatial
-  engines can win on narrow kernels / small fields. The field-size sweep (§4) is designed
-  to expose this. Because dnfc, both Cosivina variants, and cosivina-python are all spatial
-  at the *identical* truncated tap count (§1 of `benchmarking/README.md`), the
-  dnfc-vs-Cosivina / dnfc-vs-cosivina-python comparison is like-for-like — same algorithm,
-  same kernel support — not a spatial-vs-spectral confound.
-- **Spectral (FFTW) requires kernel ≤ field.** Cyclic FFT convolution zero-pads the
+- **Two spatial-vs-spectral cross-overs are exposed:** Cedar-FFTW vs the spatial engines, and
+  cosivina-python-fft vs its own spatial numba/nonumba siblings. Direct convolution cost grows with
+  (kernel width × field size); spectral cost grows with (field size × log field size) independent of
+  kernel width. So the FFT variants pull ahead on convolution-heavy regimes (wide Mexican-hat) and
+  large fields, while the five spatial engines can win on narrow kernels / small fields. The
+  field-size sweep (§4) is designed to expose this. Because dnfc, both Cosivina variants, and the two
+  spatial cosivina-python variants are all spatial at the *identical* truncated tap count (§1 of
+  `benchmarking/README.md`), the dnfc-vs-Cosivina / dnfc-vs-cosivina-python(numba/nonumba) comparison
+  is like-for-like — same algorithm, same kernel support — not a spatial-vs-spectral confound. The
+  cosivina-python-fft variant additionally provides a *float64* spectral data point (the
+  cross-platform-validation study confirms it is numerically equivalent to the spatial variants, so
+  the FFT is a genuine throughput alternative, not a different computation).
+- **Spectral requires kernel ≤ field.** Cyclic FFT convolution zero-pads the
   kernel to the field length; a kernel wider than the field aliases onto itself and
   Cedar's FFTW engine throws. This is why the smallest field sizes are bounded below by
   the widest kernel (§2, §4) — it is a real constraint of spectral convolution, not a
-  tuning choice. The OpenCV (spatial) engine has no such constraint.
+  tuning choice. The OpenCV (spatial) engine has no such constraint. (cosivina-python-fft's
+  `KernelFFT` builds the kernel at the full field size by construction, so it never trips this,
+  but it convolves the full untruncated kernel — the reason it is a distinct convolution method.)
 
 ## 3. Single machine; absolute numbers are not portable
 
@@ -63,7 +69,7 @@ depend on this specific CPU, its boost/thermal state, and the linked BLAS/FFT ba
 (NumPy/numba → the installed NumPy BLAS; MATLAB → its bundled libraries; Cedar/dnfc →
 MSVC + AVX2). Five runs per cell (`analysis.R`/`analysis_2d.R` report median, SD, SEM,
 and a 95% CI per cell) quantify short-timescale run-to-run noise *on this machine*, not
-the generality of the result across hardware. **Report the cross-framework ratios as the
+the generality of the result across hardware. **The cross-framework ratios are the
 finding; treat absolute sps as illustrative.**
 
 

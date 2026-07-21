@@ -75,9 +75,9 @@ summary_df <- timings %>%
 
 # -- Cosmetics -----------------------------------------------------------------
 
-# Six framework-variant series (matches ../benchmarking/fig_benchmark.R).
+# Seven framework-variant series (matches ../benchmarking/fig_benchmark.R).
 fw_order  <- c("dnfc", "cedar", "cedar (fftw)", "cosivina",
-               "cosivina-python", "cosivina-python (nonumba)")
+               "cosivina-python", "cosivina-python (nonumba)", "cosivina-python (fft)")
 
 fw_labels <- c(
   "dnfc"                       = "dnfc (C++, float64)",
@@ -85,7 +85,8 @@ fw_labels <- c(
   "cedar (fftw)"               = "Cedar (C++, float32, FFTW)",
   "cosivina"                   = "Cosivina (MATLAB, float64)",
   "cosivina-python"            = "cosivina-python (numba)",
-  "cosivina-python (nonumba)"  = "cosivina-python (pure NumPy)"
+  "cosivina-python (nonumba)"  = "cosivina-python (pure NumPy)",
+  "cosivina-python (fft)"      = "cosivina-python (FFT, NumPy)"
 )
 
 fw_colors <- c(
@@ -94,7 +95,8 @@ fw_colors <- c(
   "cedar (fftw)"               = "#E69F00",
   "cosivina"                   = "#009E73",
   "cosivina-python"            = "#CC79A7",
-  "cosivina-python (nonumba)"  = "#7B3294"
+  "cosivina-python (nonumba)"  = "#7B3294",
+  "cosivina-python (fft)"      = "#882255"
 )
 
 fw_shapes <- c(
@@ -103,7 +105,8 @@ fw_shapes <- c(
   "cedar (fftw)"               = 2,
   "cosivina"                   = 15,
   "cosivina-python"            = 18,
-  "cosivina-python (nonumba)"  = 5
+  "cosivina-python (nonumba)"  = 5,
+  "cosivina-python (fft)"      = 8
 )
 
 fw_lty <- c(
@@ -112,7 +115,8 @@ fw_lty <- c(
   "cedar (fftw)"               = "dashed",
   "cosivina"                   = "dashed",
   "cosivina-python"            = "dotted",
-  "cosivina-python (nonumba)"  = "dotdash"
+  "cosivina-python (nonumba)"  = "dotdash",
+  "cosivina-python (fft)"      = "longdash"
 )
 
 summary_df <- summary_df %>%

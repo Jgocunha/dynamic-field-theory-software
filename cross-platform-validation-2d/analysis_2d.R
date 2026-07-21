@@ -111,6 +111,10 @@ df_cpy_numba   <- load_framework("cosivina-python-numba",
                                  c("sigmoid_b100"), apply_cedar_shift = FALSE)
 df_cpy_nonumba <- load_framework("cosivina-python-nonumba",
                                  c("sigmoid_b100"), apply_cedar_shift = FALSE)
+# cosivina-python fft: spectral KernelFFT element (full-field untruncated
+# convolution) vs the spatial truncated kernel of every other float64 variant.
+df_cpy_fft     <- load_framework("cosivina-python-fft",
+                                 c("sigmoid_b100"), apply_cedar_shift = FALSE)
 
 df_dnfc     <- load_framework("dnfc",
                               c("abssigmoid_b100", "heaviside", "sigmoid_b100"),
@@ -125,7 +129,7 @@ df_cedar_fftw   <- load_framework("cedar-fftw",
                                   c("abssigmoid_b100", "heaviside", "sigmoid_b100"),
                                   apply_cedar_shift = TRUE)
 
-all_loaded <- bind_rows(df_cosivina, df_cpy_numba, df_cpy_nonumba,
+all_loaded <- bind_rows(df_cosivina, df_cpy_numba, df_cpy_nonumba, df_cpy_fft,
                         df_dnfc, df_cedar_opencv, df_cedar_fftw)
 cat(sprintf("Loaded %d rows total.\n", nrow(all_loaded)))
 
@@ -173,6 +177,7 @@ VAR_TOKEN <- c(
   "cedar-opencv"             = "cedar_opencv",
   "cedar-fftw"               = "cedar_fftw",
   "cosivina"                 = "cosivina",
+  "cosivina-python-fft"      = "cpy_fft",
   "cosivina-python-numba"    = "cpy_numba",
   "cosivina-python-nonumba"  = "cpy_nonumba",
   "dnfc"                     = "dnfc"
@@ -180,15 +185,15 @@ VAR_TOKEN <- c(
 
 # Algebraic equivalence is only meaningful WITHIN the same activation-function
 # family (comparing different operators must differ by design). For each family,
-# emit every C(n,2) variant pair → 3 (AbsSig) + 3 (Heaviside) + 15 (Sigmoid) = 21.
-# Sigmoid now includes cedar-opencv/cedar-fftw too (fair kernel-parity + ExpSigmoid
-# fix let Cedar run the plain-logistic variant, giving a same-activation-function
-# comparison against Cedar that previously only existed for AbsSig/Heaviside).
+# emit every C(n,2) variant pair → 3 (AbsSig) + 3 (Heaviside) + 21 (Sigmoid) = 27.
+# Sigmoid includes cedar-opencv/cedar-fftw (fair kernel-parity + ExpSigmoid fix let
+# Cedar run the plain-logistic variant) and the spectral cosivina-python-fft variant
+# (7 variants → C(7,2)=21 pairs).
 families <- list(
   abssigmoid_b100 = c("cedar-opencv", "cedar-fftw", "dnfc"),
   heaviside       = c("cedar-opencv", "cedar-fftw", "dnfc"),
-  sigmoid_b100    = c("cedar-opencv", "cedar-fftw", "cosivina", "cosivina-python-numba",
-                      "cosivina-python-nonumba", "dnfc")
+  sigmoid_b100    = c("cedar-opencv", "cedar-fftw", "cosivina", "cosivina-python-fft",
+                      "cosivina-python-numba", "cosivina-python-nonumba", "dnfc")
 )
 
 pairs_list <- list()
@@ -273,16 +278,22 @@ PAIR_LABELS <- c(
   # Sigmoid family
   cedar_opencv_vs_cedar_fftw_sigmoid_b100    = "Cedar-OpenCV vs Cedar-FFTW (Sig)",
   cedar_opencv_vs_cosivina_sigmoid_b100      = "Cedar-OpenCV Sig vs Cosivina Sig",
+  cedar_opencv_vs_cpy_fft_sigmoid_b100       = "Cedar-OpenCV Sig vs Cosivina-Python FFT Sig",
   cedar_opencv_vs_cpy_numba_sigmoid_b100     = "Cedar-OpenCV Sig vs Cosivina-Python numba Sig",
   cedar_opencv_vs_cpy_nonumba_sigmoid_b100   = "Cedar-OpenCV Sig vs Cosivina-Python nonumba Sig",
   cedar_opencv_vs_dnfc_sigmoid_b100          = "Cedar-OpenCV Sig vs dnfc Sig",
   cedar_fftw_vs_cosivina_sigmoid_b100        = "Cedar-FFTW Sig vs Cosivina Sig",
+  cedar_fftw_vs_cpy_fft_sigmoid_b100         = "Cedar-FFTW Sig vs Cosivina-Python FFT Sig",
   cedar_fftw_vs_cpy_numba_sigmoid_b100       = "Cedar-FFTW Sig vs Cosivina-Python numba Sig",
   cedar_fftw_vs_cpy_nonumba_sigmoid_b100     = "Cedar-FFTW Sig vs Cosivina-Python nonumba Sig",
   cedar_fftw_vs_dnfc_sigmoid_b100            = "Cedar-FFTW Sig vs dnfc Sig",
+  cosivina_vs_cpy_fft_sigmoid_b100           = "Cosivina Sig vs Cosivina-Python FFT Sig",
   cosivina_vs_cpy_numba_sigmoid_b100         = "Cosivina vs Cosivina-Python numba (Sig)",
   cosivina_vs_cpy_nonumba_sigmoid_b100       = "Cosivina vs Cosivina-Python nonumba (Sig)",
   cosivina_vs_dnfc_sigmoid_b100              = "Cosivina Sig vs dnfc Sig",
+  cpy_fft_vs_cpy_numba_sigmoid_b100          = "Cosivina-Python FFT vs numba (Sig)",
+  cpy_fft_vs_cpy_nonumba_sigmoid_b100        = "Cosivina-Python FFT vs nonumba (Sig)",
+  cpy_fft_vs_dnfc_sigmoid_b100               = "Cosivina-Python FFT Sig vs dnfc Sig",
   cpy_numba_vs_cpy_nonumba_sigmoid_b100      = "Cosivina-Python numba vs nonumba (Sig)",
   cpy_numba_vs_dnfc_sigmoid_b100             = "Cosivina-Python numba Sig vs dnfc Sig",
   cpy_nonumba_vs_dnfc_sigmoid_b100           = "Cosivina-Python nonumba Sig vs dnfc Sig"
@@ -291,25 +302,29 @@ PAIR_LABELS <- c(
 if (nrow(metrics) > 0) {
   fig_box <- metrics %>%
     filter(!is.na(max_abs_diff)) %>%
-    mutate(pair_label = factor(PAIR_LABELS[pair], levels = PAIR_LABELS),
+    mutate(pair_label = factor(PAIR_LABELS[pair], levels = rev(PAIR_LABELS)),
            type = factor(type, levels = c("detection","selection","memory","insufficient","multi_peak"))) %>%
-    ggplot(aes(x = type, y = max_abs_diff, fill = phase)) +
-    geom_boxplot(outlier.size = 0.8, alpha = 0.8) +
-    facet_wrap(~pair_label, ncol = 2, scales = "free_y") +
-    scale_y_log10(labels = label_scientific()) +
+    ggplot(aes(y = pair_label, x = max_abs_diff, fill = phase)) +
+    geom_vline(xintercept = c(1e-4, 2e-4), linetype = "dashed",
+               colour = "grey45", linewidth = 0.3) +
+    geom_boxplot(outlier.size = 0.6, alpha = 0.85, linewidth = 0.3) +
+    facet_grid(. ~ type) +
+    scale_x_log10(labels = label_scientific()) +
     scale_fill_manual(values = c(with_stimulus = "#3182bd", without_stimulus = "#de2d26"),
                       labels = c("Phase 1 (stim ON)", "Phase 2 (stim OFF)")) +
-    labs(x = "Simulation type", y = expression(max*"|"*Delta*u*"|"),
+    labs(y = NULL, x = expression(max*"|"*Delta*u*"|"*" (log scale)"),
          fill = "Phase",
          title = "Pointwise deviation between frameworks",
-         subtitle = "100 simulations × 5 types × 12 same-activation comparison pairs") +
-    theme_bw(base_size = 10) +
-    theme(axis.text.x = element_text(angle = 35, hjust = 1),
-          legend.position = "bottom")
+         subtitle = paste("100 simulations x 27 same-activation comparison pairs, by architecture type",
+                          "· dashed lines = float64 (1e-4) / float32 (2e-4) thresholds")) +
+    theme_bw(base_size = 11) +
+    theme(legend.position = "bottom",
+          strip.text = element_text(face = "bold"),
+          panel.spacing = unit(0.5, "lines"))
 
-  ggsave(file.path(OUT_DIR, "fig_boxplots.pdf"), fig_box,
-         width = 10, height = 7, device = cairo_pdf)
-  cat("Saved fig_boxplots.pdf\n")
+  ggsave(file.path(OUT_DIR, "fig_boxplots.png"), fig_box,
+         width = 14, height = 10, dpi = 200)
+  cat("Saved fig_boxplots.png\n")
 }
 
 # ---------------------------------------------------------------------------
@@ -348,9 +363,9 @@ if (length(heat_rows) > 0) {
     labs(title = "Representative 2D fields (dnfc, AbsSigmoid, Phase 1)",
          x = "x", y = "y", fill = "u") +
     theme_bw(base_size = 9) + theme(legend.position = "right")
-  ggsave(file.path(OUT_DIR, "fig_fields_2d.pdf"), fig_field,
-         width = 14, height = 3.4, device = cairo_pdf)
-  cat("Saved fig_fields_2d.pdf\n")
+  ggsave(file.path(OUT_DIR, "fig_fields_2d.png"), fig_field,
+         width = 14, height = 3.4, dpi = 150)
+  cat("Saved fig_fields_2d.png\n")
 
   fig_diff <- heat_all %>% filter(view == "cedar - dnfc") %>%
     ggplot(aes(x = x, y = y, fill = value)) +
@@ -361,40 +376,49 @@ if (length(heat_rows) > 0) {
     labs(title = "Cedar - dnfc difference (AbsSigmoid, Phase 1; after +1,+1 offset correction)",
          x = "x", y = "y", fill = expression(Delta*u)) +
     theme_bw(base_size = 9) + theme(legend.position = "right")
-  ggsave(file.path(OUT_DIR, "fig_difference_2d.pdf"), fig_diff,
-         width = 14, height = 3.4, device = cairo_pdf)
-  cat("Saved fig_difference_2d.pdf\n")
+  ggsave(file.path(OUT_DIR, "fig_difference_2d.png"), fig_diff,
+         width = 14, height = 3.4, dpi = 150)
+  cat("Saved fig_difference_2d.png\n")
 }
 
 # ---------------------------------------------------------------------------
-# Figure 3: Deviation heatmap (100 sims × 4 pairs, phase = with_stimulus)
+# Figure 3: Worst-case deviation summary matrix (pair × architecture type)
 # ---------------------------------------------------------------------------
 
 if (nrow(metrics) > 0) {
-  heat_df <- metrics %>%
-    filter(phase == "with_stimulus", !is.na(max_abs_diff)) %>%
+  summary_mat <- metrics %>%
+    filter(!is.na(max_abs_diff)) %>%
+    group_by(pair, type) %>%
+    summarise(worst = max(max_abs_diff), .groups = "drop") %>%
     mutate(
-      log10_dev  = log10(pmax(max_abs_diff, 1e-15)),
-      sim_num    = as.integer(sim_id),
-      pair_label = factor(PAIR_LABELS[pair], levels = PAIR_LABELS)
+      pair_label   = factor(PAIR_LABELS[pair], levels = rev(PAIR_LABELS)),
+      type         = factor(type, levels = c("detection","selection","memory","insufficient","multi_peak")),
+      thr          = ifelse(pair_is_float32(pair), 2e-4, 1e-4),
+      is_fail      = worst >= thr,
+      log10_worst  = log10(pmax(worst, 1e-15)),
+      label_txt    = formatC(worst, format = "e", digits = 1)
     )
 
-  fig_heat <- heat_df %>%
-    ggplot(aes(x = pair_label, y = sim_num, fill = log10_dev)) +
-    geom_tile() +
-    scale_fill_viridis_c(name = expression(log[10]*"|"*Delta*u*"|"[max]),
-                         option = "plasma", direction = -1) +
-    scale_y_reverse(breaks = c(1, 20, 40, 60, 80, 100),
-                    labels = c("001","020","040","060","080","100")) +
-    labs(x = "Comparison pair", y = "Simulation ID",
-         title = "Deviation heatmap (Phase 1: stimulus ON)") +
+  fig_summary <- summary_mat %>%
+    ggplot(aes(x = type, y = pair_label, fill = log10_worst)) +
+    geom_tile(colour = "white", linewidth = 0.6) +
+    geom_tile(data = filter(summary_mat, is_fail),
+              fill = NA, colour = "#d62728", linewidth = 1.1) +
+    geom_label(aes(label = label_txt), size = 2.3, label.size = 0,
+               label.padding = unit(0.12, "lines"), fill = "white",
+               alpha = 0.8, colour = "black") +
+    scale_fill_gradient(low = "#deebf7", high = "#08306b",
+                        name = expression(log[10]*"(worst "*max*"|"*Delta*u*"|)")) +
+    labs(x = "Architecture type", y = NULL,
+         title = "Worst-case deviation per pair x architecture type",
+         subtitle = "Red border = FAIL (exceeds the pair's precision-tier threshold: 1e-4 float64 / 2e-4 float32)") +
     theme_bw(base_size = 10) +
-    theme(axis.text.x = element_text(angle = 30, hjust = 1),
+    theme(axis.text.x = element_text(angle = 20, hjust = 1),
           legend.position = "right")
 
-  ggsave(file.path(OUT_DIR, "fig_deviation_heatmap.pdf"), fig_heat,
-         width = 8, height = 7, device = cairo_pdf)
-  cat("Saved fig_deviation_heatmap.pdf\n")
+  ggsave(file.path(OUT_DIR, "fig_deviation_summary.png"), fig_summary,
+         width = 9, height = 10, dpi = 200)
+  cat("Saved fig_deviation_summary.png\n")
 }
 
 # ---------------------------------------------------------------------------
@@ -469,9 +493,9 @@ by_type <- qual_check %>%
 print(as.data.frame(by_type[, c("type","pair","n","agree","pct")]), digits = 4)
 
 cat("\n  Interpretation:\n")
-cat("    All 100 simulations × 21 comparison pairs produce the same qualitative\n")
+cat("    All 100 simulations × 27 comparison pairs produce the same qualitative\n")
 cat("    field state (suprathreshold bump vs. subthreshold resting state) across\n")
-cat("    all six variants, confirming behavioural reliability.\n\n")
+cat("    all seven variants, confirming behavioural reliability.\n\n")
 
 # ── 3. Per-pair precision summary + validation CSV ──────────────────────────
 

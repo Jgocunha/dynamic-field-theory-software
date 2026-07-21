@@ -1,7 +1,7 @@
 ﻿# run_2d_benchmark.ps1 — serial 2D benchmark driver (portable).
 #
 # Runs the full 2D matrix SERIALLY:
-#   6 variants (dnfc, cedar-opencv, cedar-fftw, cpy-numba, cpy-nonumba)
+#   7 variants (dnfc, cedar-opencv, cedar-fftw, cpy-numba, cpy-nonumba, cpy-fft)
 #   x 4 regimes (detection, selection, memory, multi-peak)
 #   x 2 grids (100, 200)
 #   x N {5,10,50,100} x 5 runs (2000 timed steps)   [cosivina MATLAB run separately]
@@ -59,6 +59,7 @@ try {
       & "$CEDAR\benchmark_2d.exe"         "$D2\timings-cedar-2d.csv" $a fftw   $NCSV $g
       & python "$CPY2D" $a numba   $NCSV $g
       & python "$CPY2D" $a nonumba $NCSV $g
+      & python "$CPY2D" $a fft     $NCSV $g
     }
   }
   Write-Output "===== ALLDONE2D  ($(Get-Date)) ====="

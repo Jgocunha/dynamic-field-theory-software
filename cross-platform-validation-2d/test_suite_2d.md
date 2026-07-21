@@ -50,5 +50,7 @@ containment); the chosen values give a compact bump that persists after stimulus
 
 Identical to 1D: dnfc (3 activation functions: abs_sigmoid β=100, heaviside, sigmoid β=100),
 Cedar (abs_sigmoid β=100, heaviside; float32), Cosivina and cosivina-python (sigmoid β=100;
-float64). 700 generated files = 300 dnfc JSON + 200 Cedar JSON + 100 cosivina `.m` + 100
-cosivina-python `.py`.
+float64). The 100 generated cosivina-python `.py` files are shared by all three cosivina-python
+variants — **numba** and **nonumba** use the spatial kernel element, **fft** uses cosivina's
+spectral `KernelFFT` element (full untruncated FFT convolution) — selected at run time via the
+`COSIVINA_VARIANT` env var, so no extra sim files are generated.
