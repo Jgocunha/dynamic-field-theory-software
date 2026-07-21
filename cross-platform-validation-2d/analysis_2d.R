@@ -19,6 +19,7 @@ library(dplyr)
 library(tidyr)
 library(scales)
 library(patchwork)
+library(showtext)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -29,6 +30,20 @@ ROOT <- tryCatch(
   error = function(e) normalizePath(".")
 )
 if (is.null(ROOT) || ROOT == "") ROOT <- normalizePath(".")
+
+# -- Font: EB Garamond, matching the style used in .claude/paper's figures
+# and the benchmarking/ figure scripts. Loaded directly from file
+# (font-enumeration APIs crash on this machine's font cache; font_add() with
+# explicit paths sidesteps that entirely). showtext_opts(dpi=...) is reset
+# right before each ggsave() call below to match that figure's own dpi. ------
+
+FONT_DIR <- "C:/Users/jgocunha/AppData/Local/Microsoft/Windows/Fonts"
+font_add(
+  family  = "EB Garamond",
+  regular = file.path(FONT_DIR, "EBGaramond-VariableFont_wght.ttf"),
+  bold    = file.path(FONT_DIR, "EBGaramond-SemiBold.ttf")
+)
+showtext_auto()
 
 DATA    <- file.path(ROOT, "data")
 OUT_DIR <- ROOT   # figures written alongside analysis.R
@@ -317,13 +332,15 @@ if (nrow(metrics) > 0) {
          title = "Pointwise deviation between frameworks",
          subtitle = paste("100 simulations x 27 same-activation comparison pairs, by architecture type",
                           "· dashed lines = float64 (1e-4) / float32 (2e-4) thresholds")) +
-    theme_bw(base_size = 11) +
+    theme_minimal(base_family = "EB Garamond", base_size = 11) +
     theme(legend.position = "bottom",
+          panel.grid.minor = element_blank(),
           strip.text = element_text(face = "bold"),
           panel.spacing = unit(0.5, "lines"))
 
+  showtext_opts(dpi = 200)
   ggsave(file.path(OUT_DIR, "fig_boxplots.png"), fig_box,
-         width = 14, height = 10, dpi = 200)
+         width = 14, height = 10, dpi = 200, bg = "white")
   cat("Saved fig_boxplots.png\n")
 }
 
@@ -362,9 +379,11 @@ if (length(heat_rows) > 0) {
     coord_fixed() +
     labs(title = "Representative 2D fields (dnfc, AbsSigmoid, Phase 1)",
          x = "x", y = "y", fill = "u") +
-    theme_bw(base_size = 9) + theme(legend.position = "right")
+    theme_minimal(base_family = "EB Garamond", base_size = 9) +
+    theme(panel.grid.minor = element_blank(), legend.position = "right")
+  showtext_opts(dpi = 150)
   ggsave(file.path(OUT_DIR, "fig_fields_2d.png"), fig_field,
-         width = 14, height = 3.4, dpi = 150)
+         width = 14, height = 3.4, dpi = 150, bg = "white")
   cat("Saved fig_fields_2d.png\n")
 
   fig_diff <- heat_all %>% filter(view == "cedar - dnfc") %>%
@@ -375,9 +394,11 @@ if (length(heat_rows) > 0) {
     coord_fixed() +
     labs(title = "Cedar - dnfc difference (AbsSigmoid, Phase 1; after +1,+1 offset correction)",
          x = "x", y = "y", fill = expression(Delta*u)) +
-    theme_bw(base_size = 9) + theme(legend.position = "right")
+    theme_minimal(base_family = "EB Garamond", base_size = 9) +
+    theme(panel.grid.minor = element_blank(), legend.position = "right")
+  showtext_opts(dpi = 150)
   ggsave(file.path(OUT_DIR, "fig_difference_2d.png"), fig_diff,
-         width = 14, height = 3.4, dpi = 150)
+         width = 14, height = 3.4, dpi = 150, bg = "white")
   cat("Saved fig_difference_2d.png\n")
 }
 
@@ -406,18 +427,20 @@ if (nrow(metrics) > 0) {
               fill = NA, colour = "#d62728", linewidth = 1.1) +
     geom_label(aes(label = label_txt), size = 2.3, label.size = 0,
                label.padding = unit(0.12, "lines"), fill = "white",
-               alpha = 0.8, colour = "black") +
+               alpha = 0.8, colour = "black", family = "EB Garamond") +
     scale_fill_gradient(low = "#deebf7", high = "#08306b",
                         name = expression(log[10]*"(worst "*max*"|"*Delta*u*"|)")) +
     labs(x = "Architecture type", y = NULL,
          title = "Worst-case deviation per pair x architecture type",
          subtitle = "Red border = FAIL (exceeds the pair's precision-tier threshold: 1e-4 float64 / 2e-4 float32)") +
-    theme_bw(base_size = 10) +
+    theme_minimal(base_family = "EB Garamond", base_size = 10) +
     theme(axis.text.x = element_text(angle = 20, hjust = 1),
+          panel.grid.minor = element_blank(),
           legend.position = "right")
 
+  showtext_opts(dpi = 200)
   ggsave(file.path(OUT_DIR, "fig_deviation_summary.png"), fig_summary,
-         width = 9, height = 10, dpi = 200)
+         width = 9, height = 10, dpi = 200, bg = "white")
   cat("Saved fig_deviation_summary.png\n")
 }
 

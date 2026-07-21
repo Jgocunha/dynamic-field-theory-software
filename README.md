@@ -58,6 +58,8 @@ with **numba-JIT cosivina-python second** at both field sizes. See
 [`benchmarking/README.md`](benchmarking/README.md) for the full per-regime breakdown, methodology,
 and statistical detail.
 
+![Simulation throughput by architecture (1D)](benchmarking/fig_benchmark_throughput.png)
+
 ---
 
 ## Benchmark Results (2D)
@@ -87,6 +89,8 @@ second crossover appears **within** cosivina-python: the spectral **FFT** varian
 of its three variants (≈25 sps vs numba's 10–20 and NumPy's 3–5 at grid 100), the reverse of 1D —
 FFT's kernel-width-independent cost pays off once the field is 2D, and it stays flat across regimes
 where the spatial variants slow on the wide memory kernel.
+
+![Simulation throughput by architecture (2D)](benchmarking-2d/fig_benchmark_throughput.png)
 
 ---
 

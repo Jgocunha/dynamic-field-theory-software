@@ -13,6 +13,7 @@ suppressPackageStartupMessages({
   library(readr)
   library(ggplot2)
   library(scales)
+  library(showtext)
 })
 
 ROOT <- tryCatch(
@@ -20,6 +21,19 @@ ROOT <- tryCatch(
   error = function(e) normalizePath(".")
 )
 if (is.null(ROOT) || ROOT == "") ROOT <- normalizePath(".")
+
+# -- Font: EB Garamond, matching the style used in .claude/paper's figures.
+# Loaded directly from file (font-enumeration APIs crash on this machine's
+# font cache; font_add() with explicit paths sidesteps that entirely). ------
+
+FONT_DIR <- "C:/Users/jgocunha/AppData/Local/Microsoft/Windows/Fonts"
+font_add(
+  family  = "EB Garamond",
+  regular = file.path(FONT_DIR, "EBGaramond-VariableFont_wght.ttf"),
+  bold    = file.path(FONT_DIR, "EBGaramond-SemiBold.ttf")
+)
+showtext_auto()
+showtext_opts(dpi = 150)
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 
@@ -159,7 +173,7 @@ p_throughput <- ggplot(
     y        = "Steps per second (log scale)",
     colour   = NULL, shape = NULL, linetype = NULL
   ) +
-  theme_bw(base_size = 12) +
+  theme_minimal(base_family = "EB Garamond", base_size = 12) +
   theme(
     legend.position      = "bottom",
     legend.key.width     = unit(1.6, "cm"),
@@ -176,7 +190,7 @@ p_throughput <- ggplot(
 ggsave(
   file.path(ROOT, "fig_benchmark_throughput.png"),
   p_throughput,
-  width = 9, height = 7, dpi = 150
+  width = 9, height = 7, dpi = 150, bg = "white"
 )
 cat("Saved: fig_benchmark_throughput.png\n")
 
@@ -221,7 +235,7 @@ if (nrow(speedup_df) > 0) {
     geom_text(
       aes(label = sprintf("%.1f×", speedup)),
       position = position_dodge(width = 0.78),
-      vjust    = -0.4, size = 2.7, colour = "grey20"
+      vjust    = -0.4, size = 2.7, colour = "grey20", family = "EB Garamond"
     ) +
     scale_fill_manual(values = speedup_colors, labels = speedup_labels) +
     scale_y_continuous(
@@ -235,7 +249,7 @@ if (nrow(speedup_df) > 0) {
       y        = "Speedup (×)",
       fill     = NULL
     ) +
-    theme_bw(base_size = 13) +
+    theme_minimal(base_family = "EB Garamond", base_size = 13) +
     theme(
       legend.position      = "bottom",
       legend.text          = element_text(size = 10),
@@ -244,12 +258,12 @@ if (nrow(speedup_df) > 0) {
       plot.title           = element_text(face = "bold"),
       plot.subtitle        = element_text(size = 10, colour = "grey40")
     ) +
-    guides(fill = guide_legend(nrow = 1))
+    guides(fill = guide_legend(nrow = 2))
 
   ggsave(
     file.path(ROOT, "fig_benchmark_speedup.png"),
     p_speedup,
-    width = 9, height = 5, dpi = 150
+    width = 9, height = 5, dpi = 150, bg = "white"
   )
   cat("Saved: fig_benchmark_speedup.png\n")
 } else {
