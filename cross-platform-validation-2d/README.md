@@ -132,7 +132,14 @@ other float64 variant.
   stronger settings instead collapse the weaker bumps' self-sustain. The bistable bump radius is
   effectively quantized (a whole ring of cells switches at once), so for any parameter set some sim
   sits within epsilon of a ring boundary and a tiny perturbation tips it. The float64 pairs agree to
-  5×10⁻⁵ on these *same* sims, so the cross-framework cause is **precision, not the architecture**.
+  5×10⁻⁵ on these *same* sims, so the cross-**precision** cause (Cedar float32 vs the three float64
+  frameworks) is **precision, not the architecture.**
+- **One failing pair is not a precision effect: `cedar_opencv_vs_cedar_fftw_sigmoid_b100` (max
+  0.489, memory only) compares two Cedar engines at the *same* precision (both float32).** Here the
+  divergence is purely a **convolution-method** effect — OpenCV's truncated spatial `filter2D` vs
+  FFTW's full spectral convolution settle the bistable bump on different ring radii even with
+  precision held constant. Read together with the point above: 2D memory-regime failures have *two*
+  independent causes (precision, and convolution method), not one.
 
 Worst-case deviation per pair × architecture type (annotated matrix; red border = FAIL, all on the
 `memory` column):

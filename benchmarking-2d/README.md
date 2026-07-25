@@ -166,13 +166,14 @@ SD, and 95% CI.
 ## Data provenance
 
 All seven variants were measured on one machine (see *Test Machine* above); see
-[`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) §4 for the measurement's session structure and
-what that does and doesn't bound. Each `data/timings-*-2d.csv` row is
+[`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) §3 for what single-machine measurement does
+and doesn't bound. Each `data/timings-*-2d.csv` row is
 `framework,variant,arch,field_size,mode,N,run,steps_per_second` (8 columns; `field_size` is the
 grid side length). Regenerate all tables and figures with `Rscript analysis_2d.R` and
 `Rscript fig_benchmark_2d.R`. The cosivina-python-FFT rows were added in a later measurement session
 than the other variants; treat cross-variant *ratios* as the portable result (`TRADE_OFF_CAVEATS.md`
-§4).
+§3). A full re-run unifying all variants into one session is planned, which will remove
+this caveat.
 
 | Data file | Variants | Rows |
 |---|---|---:|

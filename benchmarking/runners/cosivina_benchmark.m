@@ -1,8 +1,9 @@
 %% cosivina_benchmark.m
-% Benchmarks Cosivina DFT simulations in headless mode across the five
-% architectures (detection / selection / memory / insufficient / multi-peak),
-% reusing the representative validation sim of each band. Appends results to
-% data/timings-cosivina.csv.
+% Benchmarks Cosivina DFT simulations in headless mode across the four
+% canonical architectures (detection / selection / memory / multi-peak),
+% reusing the representative validation sim of each band ("insufficient" is a
+% validation-only subthreshold negative control, not benchmarked). Appends
+% results to data/timings-cosivina.csv.
 %
 % Prerequisites:
 %   - Cosivina on the MATLAB path
@@ -70,6 +71,14 @@ function run_arch(fid, archName, N_VALUES, fieldSize, baseSize, noiseAmp, WARMUP
 
         [sim, stimHandles] = build_sim(N, archName, fieldSize, baseSize, noiseAmp);
         sim.init();
+        if isMemory
+            % Establish-then-remove before warm-up too, so the discarded warm-up
+            % steps reflect the same post-establish state the timed runs start from.
+            for t = 1:100; sim.step(); end
+            for s = 1:numel(stimHandles)
+                stimHandles{s}.output(:) = 0;
+            end
+        end
         for t = 1:WARMUP_STEPS; sim.step(); end
 
         for r = 1:N_RUNS

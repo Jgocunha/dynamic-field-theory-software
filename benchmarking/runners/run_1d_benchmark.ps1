@@ -37,6 +37,12 @@ Write-Output "ACQUIRED LOCK pid $PID  ($(Get-Date))"
 try {
   $env:PATH = ($CEDAR_DLL_PATHS -join ";") + ";" + $env:PATH
 
+  # dnfc has no thread pool by construction (see TRADE_OFF_CAVEATS.md §7), so this is
+  # defensive rather than load-bearing; set for parity with the other three variants'
+  # explicit single-thread pins.
+  $env:OMP_NUM_THREADS = "1"
+  $env:MKL_NUM_THREADS = "1"
+
   $CPY1D = "$ROOT\benchmarking\runners\cosivina_python_benchmark.py"
   $D1    = "$ROOT\benchmarking\data"
   $ARCHS = @("detection","selection","memory","multi-peak")

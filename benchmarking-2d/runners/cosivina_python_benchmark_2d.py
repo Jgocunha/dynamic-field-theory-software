@@ -1,17 +1,18 @@
 """
 cosivina_python_benchmark_2d.py
-Benchmarks cosivina-python 2D DFT simulations (50x50) in headless mode.
+Benchmarks cosivina-python 2D DFT simulations on an NxN grid in headless mode.
 Appends results to data/timings-cosivina-python-2d.csv.
 
 Prerequisites:
   - cosivina-python installed or available at C:/dev-files/cosivina_python
   - Run from the benchmarking-2d/ root directory
 
-Output rows (no header): cosivina-python,headless,<N>,<run>,<steps_per_second>
+Output rows (no header, 8 columns):
+  cosivina-python,<variant>,<arch>,<grid>,headless,<N>,<run>,<steps_per_second>
 
 Usage:
   cd benchmarking-2d
-  python runners/cosivina_python_benchmark_2d.py
+  python runners/cosivina_python_benchmark_2d.py [arch] [variant] [N_csv] [grid]
 """
 
 import os
@@ -208,6 +209,11 @@ def main():
                 stimuli = [el for el in sim.elements if isinstance(el, GaussStimulus2D)]
 
             sim.init()
+            if arch_name == "memory":
+                # Establish-then-remove before warm-up too (matches the Cedar driver), so
+                # the discarded warm-up steps reflect the same post-establish state the
+                # timed runs start from, rather than the stimulus sitting at its initial value.
+                establish_then_remove_stimulus(stimuli, sim)
             for _ in range(WARMUP_STEPS):
                 sim.step()
 

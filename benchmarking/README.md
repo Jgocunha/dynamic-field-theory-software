@@ -24,8 +24,11 @@ counterpart lives in [`../benchmarking-2d/`](../benchmarking-2d/).
 **Single-threading is enforced, not assumed.** Each runner pins its math-library thread pools to 1
 before timing: Python sets `OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=NUMBA_NUM_THREADS=1`
 (before numpy import); MATLAB calls `maxNumCompThreads(1)`; the Cedar runner calls
-`cv::setNumThreads(0)` to disable OpenCV's internal threading; dnfc's loop is plain scalar C++ with no
-thread pool. No CPU-affinity pinning was applied (single-threaded workloads do not require it).
+`cv::setNumThreads(0)` to disable OpenCV's internal threading; dnfc has no thread pool by
+construction (a flat loop over element handles), so its "single-threaded" status is a property of
+the code, not a pinned setting — the orchestrator sets `OMP_NUM_THREADS`/`MKL_NUM_THREADS=1` for it
+anyway, defensively, for parity with the other three variants' explicit pins. No CPU-affinity pinning
+was applied (single-threaded workloads do not require it).
 
 ---
 
@@ -154,8 +157,8 @@ mean, SD, and 95% CI.
 ## Data provenance
 
 All seven variants were measured on one machine (see *Test Machine* above); see
-[`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) §4 for the measurement's session structure and
-what that does and doesn't bound. Each `data/timings-*.csv` row is
+[`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) §3 for what single-machine measurement does
+and doesn't bound. Each `data/timings-*.csv` row is
 `framework,variant,arch,field_size,mode,N,run,steps_per_second` (8 columns). Regenerate all tables
 and figures with `Rscript analysis.R` and `Rscript fig_benchmark.R`.
 

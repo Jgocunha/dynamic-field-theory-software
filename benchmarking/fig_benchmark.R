@@ -158,8 +158,8 @@ p_throughput <- ggplot(
   geom_point(size = 2.6) +
   facet_grid(arch ~ size_label, scales = "free_y") +
   scale_x_log10(
-    breaks = c(5, 10, 50, 100, 500, 1000),
-    labels = c("5", "10", "50", "100", "500", "1k")
+    breaks = c(5, 10, 50, 100),
+    labels = c("5", "10", "50", "100")
   ) +
   scale_y_log10(labels = label_comma()) +
   scale_colour_manual(values = fw_colors, labels = fw_labels) +
@@ -171,6 +171,7 @@ p_throughput <- ggplot(
     subtitle = "Steps per second · headless · point = median · ribbon = 95% CI of the mean",
     x        = "Number of independent neural fields (N)",
     y        = "Steps per second (log scale)",
+    caption  = "Each row (architecture) has an independent y-axis (facet scales = \"free_y\")",
     colour   = NULL, shape = NULL, linetype = NULL
   ) +
   theme_minimal(base_family = "EB Garamond", base_size = 12) +
@@ -247,6 +248,7 @@ if (nrow(speedup_df) > 0) {
       subtitle = "Dashed line = Cosivina baseline (1×). Values > 1× are faster.",
       x        = "Architecture",
       y        = "Speedup (×)",
+      caption  = "Each field-size panel has an independent y-axis (facet scales = \"free_y\")",
       fill     = NULL
     ) +
     theme_minimal(base_family = "EB Garamond", base_size = 13) +

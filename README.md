@@ -21,6 +21,30 @@ All frameworks implement the 1D Amari equation:
 
 ---
 
+## Implementation Differences
+
+The seven benchmarked variants differ in more than raw speed — each combines a different
+convolution algorithm, SIMD mechanism, and threading model. These are framework
+characteristics, not benchmark artifacts; see `TRADE_OFF_CAVEATS.md` for how each is
+controlled for or disclosed.
+
+| Variant | Language | Precision | Convolution | SIMD mechanism | Threading control | Per-step overhead |
+|---|---|---|---|---|---|---|
+| dnfc | C++ | float64 | Direct spatial, truncated kernel; hand-written AVX2+FMA kernel | Compile-time `/arch:AVX2` (+ runtime `cpuid` fallback for non-AVX2 CPUs) | No thread pool (single-threaded by construction); env vars pinned defensively | Flat element-handle loop, no locking |
+| Cedar (OpenCV engine) | C++ | float32 | Direct spatial, truncated kernel (`cv::filter2D`) | Cedar's own code has no arch flag; OpenCV dispatches AVX2/AVX-512 at runtime via `cpuid` | `cv::setNumThreads(0)` | Qt read/write locks, `onTrigger` dispatch, `copyMakeBorder` allocation |
+| Cedar (FFTW engine) | C++ | float32 | Spectral, full field (FFT × FFT → inverse FFT) | FFTW selects SIMD codelets at runtime | `cv::setNumThreads(0)` | Same Cedar structural tax as OpenCV engine |
+| Cosivina (MATLAB) | MATLAB | float64 | Direct spatial, truncated kernel (`conv2`) | MATLAB's bundled vendor BLAS, runtime-dispatched | `maxNumCompThreads(1)` | Interpreted per-step loop overhead |
+| cosivina-python (numba) | Python | float64 | Direct spatial, truncated kernel (`np.convolve`/`parCircConv`) | numba JIT via LLVM, host-CPU-targeted (AVX2 on this machine) | Six `*_NUM_THREADS=1` env vars | Per-element jitclass dispatch |
+| cosivina-python (nonumba) | Python | float64 | Direct spatial, truncated kernel, pure NumPy | NumPy/BLAS, runtime-dispatched | Six `*_NUM_THREADS=1` env vars | Per-element pure-Python dispatch |
+| cosivina-python (fft) | Python | float64 | Spectral, full untruncated field (`KernelFFT`, `rfft2`/`irfft2`) | NumPy FFT (pocketfft), runtime-dispatched; no numba implementation exists | Six `*_NUM_THREADS=1` env vars | Per-element pure-Python dispatch |
+
+All seven use the identical logistic-sigmoid activation (β=100) in the throughput
+benchmark — Cedar's is its stock `ExpSigmoid` class, config-selected to override its
+factory-default `AbsSigmoid`. See `cross-platform-validation/README.md` §2.4 for the
+full activation-function equivalence table across frameworks.
+
+---
+
 ## Repository Layout
 
 | Directory | Contents |
@@ -152,12 +176,18 @@ confirming FFT ≈ truncated spatial convolution). Every Cedar-involving pair ag
 insufficient, and multi-peak; only the **memory** architecture exceeds the threshold, on **both**
 Cedar engines and all three activation functions. The self-sustaining bistable bump locks into a
 *different radius* in float32 vs float64 (e.g. 177 vs 166 cells), giving field-wide differences up
-to ~2.6. This is a precision effect, not an algorithmic one: a parameter sweep only relocates which
-sim lands on a ring boundary, and the float64 pairs reproduce the same bumps exactly. We checked
-whether the activation function is responsible — it is not the cross-framework cause: Cedar's and
-dnfc's AbsSigmoid are the identical double formula, and with the function held fixed Cedar's bump
-is still a ring larger (the residual is Cedar's CV_32F truncated OpenCV convolution). The function
-*choice* does affect bump size, but as a separate, compounding effect. See
+to ~2.6. This is a precision **and convolution-method** effect, not a purely algorithmic one: a
+parameter sweep only relocates which sim lands on a ring boundary, and the float64 pairs reproduce
+the same bumps exactly. But precision alone does not explain every failure — the
+`cedar_opencv_vs_cedar_fftw_sigmoid_b100` pair fails too (max deviation 0.489), and both engines are
+**float32**; that failure is Cedar-OpenCV's spatial convolution vs Cedar-FFTW's spectral convolution
+disagreeing at the same precision, i.e. a convolution-method sensitivity of the bistable bump radius,
+not a precision artifact. We checked whether the activation function is responsible — it is not the
+cross-framework cause: Cedar's and dnfc's AbsSigmoid are the identical double formula, and with the
+function held fixed Cedar's bump is still a ring larger (the residual is Cedar's CV_32F truncated
+OpenCV convolution). The function *choice* does affect bump size, but as a separate, compounding
+effect. This 2D-memory finding does not extend to 1D, where engine choice does not change the
+result (§3.1 of `cross-platform-validation/README.md`). See
 [`cross-platform-validation-2d/README.md`](cross-platform-validation-2d/README.md) and
 `.claude/reports/cedar-notes.md` for the full decomposition. Behaviour still agrees 100%.
 

@@ -2,19 +2,20 @@
 //
 // Drives the REAL Cedar library: builds an architecture of N independent 2D
 // neural fields (each: 1 GaussInput + 1 NeuralField with a lateral Gauss kernel)
-// on a fixed 50x50 grid by generating a Cedar JSON and loading it with
-// cedar::proc::Group::readJson, then times stepping the fields. No field
-// equations are reimplemented.
+// on an NxN grid given by the grid argument, by generating a Cedar JSON and
+// loading it with cedar::proc::Group::readJson, then times stepping the
+// fields. No field equations are reimplemented.
 //
 // 2D counterpart of benchmark.cpp (Plan 01 real-API benchmark). Same protocol
 // and per-field architecture, promoted to 2D.
 //
 // Build: registered via cedar_add_executable in the sibling CMakeLists.txt.
 //
-// Usage: benchmark_2d [output_csv]
-//   output_csv defaults to "timings-cedar-2d.csv"
+// Usage: benchmark_2d [output_csv] [arch] [variant] [N_csv] [grid]
+//   output_csv defaults to "timings-cedar-2d.csv"; variant: opencv (default) | fftw
 //
-// Output rows (no header): cedar,headless,<N>,<run>,<steps_per_second>
+// Output rows (no header, 8 columns):
+//   cedar,<variant>,<arch>,<grid>,headless,<N>,<run>,<steps_per_second>
 
 #include "cedar/processing/Group.h"
 #include "cedar/processing/StepTime.h"

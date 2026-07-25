@@ -10,10 +10,11 @@
 //
 // Build: registered via cedar_add_executable in the sibling CMakeLists.txt.
 //
-// Usage: benchmark [output_csv]
-//   output_csv defaults to "timings-cedar.csv"
+// Usage: benchmark [output_csv] [arch] [variant] [N_csv] [field_size]
+//   output_csv defaults to "timings-cedar.csv"; variant: opencv (default) | fftw
 //
-// Output rows (no header): cedar,headless,<N>,<run>,<steps_per_second>
+// Output rows (no header, 8 columns):
+//   cedar,<variant>,<arch>,<field_size>,headless,<N>,<run>,<steps_per_second>
 
 #include "cedar/processing/Group.h"
 #include "cedar/processing/StepTime.h"

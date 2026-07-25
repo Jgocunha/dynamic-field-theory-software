@@ -1,7 +1,7 @@
 %% cosivina_benchmark_2d.m
 % Benchmarks Cosivina 2D DFT simulations in headless mode across the four canonical
 % architectures (detection / selection / memory / multi-peak) and two grid sizes
-% (25x25, 50x50), reusing the representative validation sim of each band with the 2D
+% (100x100, 200x200), reusing the representative validation sim of each band with the 2D
 % amplitude adjustments (positions on the 50-grid; selection kernel amp x4; memory
 % exc/inh x2.5 + global -0.05). Appends results to data/timings-cosivina-2d.csv.
 %
@@ -64,6 +64,14 @@ function run_arch(fid, archName, N_VALUES, gridSide, baseGrid, noiseAmp, WARMUP_
 
         [sim, stimHandles] = build_sim(N, archName, gridSide, baseGrid, noiseAmp);
         sim.init();
+        if isMemory
+            % Establish-then-remove before warm-up too, so the discarded warm-up
+            % steps reflect the same post-establish state the timed runs start from.
+            for t = 1:100; sim.step(); end
+            for s = 1:numel(stimHandles)
+                stimHandles{s}.output(:) = 0;
+            end
+        end
         for t = 1:WARMUP_STEPS; sim.step(); end
 
         for r = 1:N_RUNS

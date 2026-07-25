@@ -1,4 +1,4 @@
-# analysis_2d.R — DFT Framework 2D Benchmark Analysis (50x50 fields)
+# analysis_2d.R — DFT Framework 2D Benchmark Analysis (100x100 / 200x200 fields)
 #
 # 2D counterpart of ../benchmarking/analysis.R. Reads the four per-framework
 # timing CSVs and produces, per architecture: median steps/second × N, 95% CI,
@@ -6,7 +6,7 @@
 #
 # CSV format (no header, comma-separated):
 #   framework, variant, arch, field_size, mode, N, run, steps_per_second
-# (field_size = grid side length: 25 means a 25x25 field.)
+# (field_size = grid side length: 100 means a 100x100 field.)
 #
 # Run from the benchmarking-2d/ root directory:
 #   Rscript analysis_2d.R

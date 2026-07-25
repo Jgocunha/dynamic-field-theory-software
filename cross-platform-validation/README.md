@@ -1,7 +1,7 @@
 # Cross-Platform Validation Report
 ## Dynamic Neural Field Theory Implementations: Cedar, Cosivina, cosivina-python, and dnf-composer
 
-**Variants compared (6):** Cedar-OpenCV (C++, float32, spatial conv), Cedar-FFTW (C++, float32, Fourier conv), Cosivina (MATLAB, float64), cosivina-python-numba (Python/NumPy + numba JIT, float64), cosivina-python-nonumba (pure Python/NumPy, float64), dnfc (C++, float64)  
+**Variants compared (7):** Cedar-OpenCV (C++, float32, spatial conv), Cedar-FFTW (C++, float32, Fourier conv), Cosivina (MATLAB, float64), cosivina-python-numba (Python/NumPy + numba JIT, float64), cosivina-python-nonumba (pure Python/NumPy, float64), cosivina-python-fft (Python/NumPy, float64, spectral conv), dnfc (C++, float64)  
 **Scope:** 100 simulations × 5 DFT architectures × 2 simulation phases, compared as cross-framework + within-framework-variant pairs
 
 ---
@@ -75,7 +75,15 @@ Three sigmoid variants are tested:
 
 Cedar's logistic-sigmoid variant is its own built-in `ExpSigmoid` class (not new code) — added so
 the suite has a working same-activation-function comparison against Cedar in all three families,
-not just AbsSigmoid/Heaviside.
+not just AbsSigmoid/Heaviside. This is a JSON-config selection of a stock Cedar class, overriding
+Cedar's factory-default sigmoid (`AbsSigmoid`, β=100) for this configuration only — no Cedar library
+code is modified.
+
+Cedar also natively implements `SemiLinearTransferFunction`, `LinearTransferFunction`, and
+`Logarithm`, none of which have a counterpart in dnfc, Cosivina, or cosivina-python, so no
+cross-framework pair exists for them. Every activation function implemented in **more than one**
+framework (logistic, AbsSigmoid, Heaviside) has a validated pair above — activation-function
+coverage is complete.
 
 ### 2.5 Comparison Pairs
 
@@ -251,7 +259,11 @@ All **27** same-family comparison pairs **PASS** the algebraic equivalence crite
 
 - **Cedar OpenCV vs FFTW (engine equivalence):** the two convolution engines (spatial vs Fourier)
   agree to the float32 ceiling (max 1×10⁻⁴, median 0) on every 1D architecture and every activation
-  function, including the added Sigmoid variant — the engine choice does not change the result.
+  function, including the added Sigmoid variant — the engine choice does not change the result **in
+  1D**. This does not hold in 2D: the `cedar_opencv_vs_cedar_fftw_sigmoid_b100` pair fails on the
+  `memory` architecture (max deviation 0.489) — a convolution-method sensitivity of the bistable bump
+  radius that only appears once the field is 2D. See
+  `../cross-platform-validation-2d/README.md`.
 - **Cedar vs dnfc (all three families), both engines:** Cedar internally uses 32-bit floating-point
   arithmetic (OpenCV `CV_32F`). Against dnfc's float64 computation of the same equations, pointwise
   deviations are bounded by the float32 rounding-error ceiling (max ~1×10⁻⁴, median 0). The

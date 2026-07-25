@@ -7,11 +7,12 @@ Prerequisites:
   - cosivina-python installed or available at C:/dev-files/cosivina_python
   - Run from the benchmarking/ root directory
 
-Output rows (no header): cosivina-python,headless,<N>,<run>,<steps_per_second>
+Output rows (no header, 8 columns):
+  cosivina-python,<variant>,<arch>,<field_size>,headless,<N>,<run>,<steps_per_second>
 
 Usage:
   cd benchmarking
-  python runners/cosivina_python_benchmark.py
+  python runners/cosivina_python_benchmark.py [arch] [variant] [N_csv] [field_size]
 """
 
 import os
@@ -208,6 +209,11 @@ def main():
                 stimuli = [el for el in sim.elements if isinstance(el, GaussStimulus1D)]
 
             sim.init()
+            if arch_name == "memory":
+                # Establish-then-remove before warm-up too (matches the Cedar driver), so
+                # the discarded warm-up steps reflect the same post-establish state the
+                # timed runs start from, rather than the stimulus sitting at its initial value.
+                establish_then_remove_stimulus(stimuli, sim)
             for _ in range(WARMUP_STEPS):
                 sim.step()
 
