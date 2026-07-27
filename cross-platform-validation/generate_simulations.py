@@ -3,6 +3,7 @@ Generate all simulation files for the cross-framework algebraic equivalence test
 
 Outputs (relative to this script's directory):
   simulations/cosivina/sim_NNN.m                    (100 files)
+  simulations/cosivina-fft/sim_NNN.m                (100 files)
   simulations/cosivina-python/sim_NNN.py            (100 files)
   simulations/dnfc/sim_NNN_abssigmoid_b100.json     (100)
   simulations/dnfc/sim_NNN_heaviside.json           (100)
@@ -10,7 +11,7 @@ Outputs (relative to this script's directory):
   simulations/cedar/sim_NNN_abssigmoid_b100.json    (100)
   simulations/cedar/sim_NNN_heaviside.json          (100)
 
-Total: 700 files.
+Total: 800 files.
 """
 
 import json
@@ -188,6 +189,7 @@ assert len(SIMS) == 100, f"Expected 100 sims, got {len(SIMS)}"
 # folder — the .py files are identical, only the runner's import differs. Cedar
 # splits opencv/fftw because the convolution-engine string is baked into the JSON.
 COSIVINA_DIR        = ROOT / "simulations" / "cosivina"
+COSIVINA_FFT_DIR    = ROOT / "simulations" / "cosivina-fft"
 COSIVINA_PYTHON_DIR = ROOT / "simulations" / "cosivina-python"
 DNFC_DIR            = ROOT / "simulations" / "dnfc"
 CEDAR_OPENCV_DIR    = ROOT / "simulations" / "cedar-opencv"
@@ -674,6 +676,73 @@ sim.init();
 """
 
 
+def build_cosivina_fft_script(sim: dict, output_dir: str) -> str:
+    """Same as build_cosivina_script but the convolution kernel is the spectral
+    KernelFFT element instead of GaussKernel1D/LateralInteractions1D. Parameters
+    are mapped 1:1 (see KernelFFT(label,size,sigmaExc,ampExc,sigmaInh,ampInh,
+    ampGlobal,circular,normalized) in cosivina/elements/KernelFFT.m); sigmaInh is
+    a placeholder (1) when ampInh=0 since it is then unused."""
+    sid = sim["id"]
+    stype = sim["type"]
+    k = sim["kernel"]
+
+    add_stim, sum_inputs, set_zero = _cosivina_stimuli_block(sim)
+    restore_stim = _cosivina_restore_stim(sim)
+
+    if k["type"] == "gauss":
+        amp_global = k.get("amp_global", 0.0)
+        kernel_line = (
+            f"sim.addElement(KernelFFT('u -> u', fieldSize, "
+            f"{k['sigma']}, {k['amp']}, 1, 0, {amp_global}, true, true), "
+            f"'field u', 'output', 'field u');"
+        )
+    else:
+        kernel_line = (
+            f"sim.addElement(KernelFFT('u -> u', fieldSize, "
+            f"{k['sigma_exc']}, {k['amp_exc']}, {k['sigma_inh']}, {k['amp_inh']}, 0.0, true, true), "
+            f"'field u', 'output', 'field u');"
+        )
+
+    out_dir_str = output_dir.replace("\\", "/")
+
+    return f"""%% Simulation sim_{sid} — type: {stype} (cosivina-fft: spectral KernelFFT convolution)
+% Auto-generated. Do not edit manually.
+
+fieldSize = 100;
+sim = Simulator();
+sim.deltaT = 25;
+
+{add_stim}
+sim.addElement(SumInputs('stimulus sum', fieldSize), {sum_inputs});
+
+sim.addElement(NeuralField('field u', fieldSize, 25, {sim['h']}, 100), 'stimulus sum');
+
+{kernel_line}
+
+outputDir = '{out_dir_str}';
+
+%% Phase 1: stimulus ON — 500 steps
+sim.init();
+for t = 1:500
+    sim.step();
+end
+u = sim.getComponent('field u', 'activation');
+writematrix(u, fullfile(outputDir, 'sim_{sid}_sigmoid_b100_with_stimulus.csv'));
+
+%% Phase 2: stimulus OFF — 500 steps
+{set_zero}
+for t = 1:500
+    sim.step();
+end
+u = sim.getComponent('field u', 'activation');
+writematrix(u, fullfile(outputDir, 'sim_{sid}_sigmoid_b100_without_stimulus.csv'));
+
+%% Re-initialise (restores all parameters to construction values)
+{restore_stim}
+sim.init();
+"""
+
+
 # ---------------------------------------------------------------------------
 # cosivina-python script generator
 # ---------------------------------------------------------------------------
@@ -867,9 +936,10 @@ def main():
     cedar_act_fns = ["abssigmoid_b100", "heaviside", "sigmoid_b100"]
 
     cosivina_out        = str(ROOT / "data" / "cosivina")
+    cosivina_fft_out    = str(ROOT / "data" / "cosivina-fft")
     cosivina_python_out = str(ROOT / "data" / "cosivina-python")
 
-    for d in (COSIVINA_DIR, COSIVINA_PYTHON_DIR, DNFC_DIR,
+    for d in (COSIVINA_DIR, COSIVINA_FFT_DIR, COSIVINA_PYTHON_DIR, DNFC_DIR,
               CEDAR_OPENCV_DIR, CEDAR_FFTW_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
@@ -882,6 +952,12 @@ def main():
         script = build_cosivina_script(sim, cosivina_out)
         path = COSIVINA_DIR / f"sim_{sid}.m"
         path.write_text(script, encoding="utf-8")
+        n_written += 1
+
+        # ── Cosivina-fft (MATLAB, spectral KernelFFT) ───────────────────────
+        fft_script = build_cosivina_fft_script(sim, cosivina_fft_out)
+        path = COSIVINA_FFT_DIR / f"sim_{sid}.m"
+        path.write_text(fft_script, encoding="utf-8")
         n_written += 1
 
         # ── cosivina-python ─────────────────────────────────────────────────
@@ -910,6 +986,7 @@ def main():
 
     print(f"Written {n_written} simulation files.")
     print(f"  cosivina:        {len(SIMS)} .m files")
+    print(f"  cosivina-fft:    {len(SIMS)} .m files")
     print(f"  cosivina-python: {len(SIMS)} .py files")
     print(f"  dnfc:            {len(SIMS) * len(dnfc_act_fns)} .json files")
     print(f"  cedar-opencv:    {len(SIMS) * len(cedar_act_fns)} .json files")

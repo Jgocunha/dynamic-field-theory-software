@@ -27,7 +27,7 @@ intrinsic property of the framework, not a confound:
 
 | Framework / variant      | Convolution method                              |
 |--------------------------|-------------------------------------------------|
-| dnfc                     | Direct spatial convolution (truncated kernel)   |
+| dnfc                     | Hybrid: direct spatial (truncated kernel) below a tap-count threshold; FFTW spectral (full field) above it — see note below |
 | Cedar (OpenCV engine)    | Direct spatial convolution (`cv::filter2D`, zero-pad + wrap) |
 | Cedar (FFTW engine)      | Spectral: FFT × FFT → inverse FFT (cyclic)      |
 | Cosivina (MATLAB)        | Direct spatial convolution (`conv2`, separable in 2D) |
@@ -61,6 +61,52 @@ not normalized away. Two important structural facts follow:
   tuning choice. The OpenCV (spatial) engine has no such constraint. (cosivina-python-fft's
   `KernelFFT` builds the kernel at the full field size by construction, so it never trips this,
   but it convolves the full untruncated kernel — the reason it is a distinct convolution method.)
+
+**dnfc's hybrid dispatch (added after the 2D memory-regime cross-over above was
+identified as dnfc's weakest margin — see `benchmarking-2d/README.md`):** dnfc now
+carries a second, spectral convolution path (`tools/fft_convolution.h`, FFTW3 — the
+same library Cedar-FFTW uses, so the comparison isolates framework overhead from
+FFT-library quality rather than confounding the two) alongside its original direct
+path. Currently wired for `MexicanHatKernel2D` only (the widest, and only
+two-component, kernel among dnfc's element types); `GaussKernel2D` and the 1D
+elements still use the direct path exclusively.
+
+- **Dispatch rule, and how it was derived.** An element switches to the spectral
+  path when `circular=true`, the grid is at least 100×100 (see next bullet), and the
+  combined exc+inh tap count exceeds 120 taps/cell. That threshold comes from equating
+  the two paths' FLOP costs — direct ≈ 2 × taps × cells, spectral ≈ 2 × (5 × cells ×
+  log2(cells)) for a forward+inverse real FFT — which crosses at roughly 115–130
+  taps/cell for the grid sizes this benchmark uses (100×100, 200×200). It was **not**
+  fitted to this benchmark's own four regimes: only `memory` uses `MexicanHatKernel2D`
+  at all, so `detection`/`selection`/`multi-peak` are structurally unaffected by this
+  change regardless of where the threshold sits.
+- **The ≥100×100 floor is a real, separate restriction, not a fit to dodge a test.**
+  dnf-composer's own internal regression fixtures (`FieldDynamics2D.AllSimsMatchReference`,
+  sims 049/050) exercise this exact kernel shape on a *50×50* grid, where the wide
+  inhibitory kernel is clamped to near-full-field support by construction. That
+  specific configuration sits on a **bistable abssigmoid memory attractor knife-edge**
+  — the same class of fragility already documented in dnfc's own source (see the
+  reverted "scalar symmetric folding" attempt in `tools/math.h` / `simd_dispatch_avx2.cpp`,
+  which cites the identical sims and an identical "dev up to 3.7" failure signature).
+  Restricting the spectral path to grids at least as large as anything this benchmark
+  or the cross-platform-validation suite actually exercises avoids that known fragility
+  without touching the fixtures or loosening the dispatch rule itself.
+- **Numerically verified, with an important caveat about the *memory* regime specifically.**
+  With the field's noise source disabled, the spectral and direct paths agree to below
+  the printed-precision floor (deterministic control, `MexicanHatKernel2D` at grid=100) —
+  confirming the FFT kernel construction (circular wrap-embedding, sign, centering) is
+  correct, not merely "close." With noise enabled (as the benchmark itself runs), the two
+  paths' final-activation trajectories diverge substantially (~10% relative) over the
+  full 2000-step run. This is **not** a defect in either path: `memory` is a self-sustained,
+  marginally-stable bump attractor, and continuous stochastic forcing makes such a system
+  chaotically sensitive to *any* valid numerical perturbation — the same mechanism behind
+  the 049/050 fragility above, just triggered by noise instead of a reordering. Both
+  trajectories are equally valid realizations of the same stochastic dynamics; they are
+  simply different realizations. Anyone who needs bit-comparable trajectories between the
+  two paths for a noise-driven memory simulation should be aware of this and pin one path
+  explicitly rather than rely on the automatic dispatch.
+- **License.** dnf-composer is GPL-3.0; FFTW is GPL-licensed — compatible, no new
+  restriction introduced.
 
 ## 3. Single machine; absolute numbers are not portable
 

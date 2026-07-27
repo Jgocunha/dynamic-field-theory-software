@@ -30,7 +30,7 @@ controlled for or disclosed.
 
 | Variant | Language | Precision | Convolution | SIMD mechanism | Threading control | Per-step overhead |
 |---|---|---|---|---|---|---|
-| dnfc | C++ | float64 | Direct spatial, truncated kernel; hand-written AVX2+FMA kernel | Compile-time `/arch:AVX2` (+ runtime `cpuid` fallback for non-AVX2 CPUs) | No thread pool (single-threaded by construction); env vars pinned defensively | Flat element-handle loop, no locking |
+| dnfc | C++ | float64 | Hybrid: direct spatial (truncated kernel, hand-written AVX2+FMA) below a tap-count threshold, FFTW spectral (full field) above it — currently wired for `MexicanHatKernel2D` only, circular boundaries only, grid ≥ 100×100 | Compile-time `/arch:AVX2` (+ runtime `cpuid` fallback for non-AVX2 CPUs); FFTW selects its own SIMD codelets at runtime | No thread pool (single-threaded by construction); env vars pinned defensively | Flat element-handle loop, no locking |
 | Cedar (OpenCV engine) | C++ | float32 | Direct spatial, truncated kernel (`cv::filter2D`) | Cedar's own code has no arch flag; OpenCV dispatches AVX2/AVX-512 at runtime via `cpuid` | `cv::setNumThreads(0)` | Qt read/write locks, `onTrigger` dispatch, `copyMakeBorder` allocation |
 | Cedar (FFTW engine) | C++ | float32 | Spectral, full field (FFT × FFT → inverse FFT) | FFTW selects SIMD codelets at runtime | `cv::setNumThreads(0)` | Same Cedar structural tax as OpenCV engine |
 | Cosivina (MATLAB) | MATLAB | float64 | Direct spatial, truncated kernel (`conv2`) | MATLAB's bundled vendor BLAS, runtime-dispatched | `maxNumCompThreads(1)` | Interpreted per-step loop overhead |

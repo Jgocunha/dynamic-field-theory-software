@@ -108,6 +108,11 @@ df_cosivina <- load_framework("cosivina",
                               c("sigmoid_b100"),
                               apply_cedar_shift = FALSE)
 
+# cosivina-fft: cosivina's own spectral KernelFFT element (MATLAB counterpart of
+# cosivina-python-fft) vs cosivina's spatial (truncated-kernel) convolution.
+df_cosivina_fft <- load_framework("cosivina-fft",
+                                  c("sigmoid_b100"), apply_cedar_shift = FALSE)
+
 # cosivina-python: two variants (numba JIT vs pure-NumPy). Same code path → expected
 # to agree to ~machine epsilon; numba is the canonical cpy for cross-framework pairs.
 df_cpy_numba   <- load_framework("cosivina-python-numba",
@@ -133,7 +138,7 @@ df_cedar_fftw   <- load_framework("cedar-fftw",
                                   c("abssigmoid_b100", "heaviside", "sigmoid_b100"),
                                   apply_cedar_shift = TRUE)
 
-all_loaded <- bind_rows(df_cosivina, df_cpy_numba, df_cpy_nonumba, df_cpy_fft,
+all_loaded <- bind_rows(df_cosivina, df_cosivina_fft, df_cpy_numba, df_cpy_nonumba, df_cpy_fft,
                         df_dnfc, df_cedar_opencv, df_cedar_fftw)
 cat(sprintf("Loaded %d rows total.\n", nrow(all_loaded)))
 
@@ -181,6 +186,7 @@ VAR_TOKEN <- c(
   "cedar-opencv"             = "cedar_opencv",
   "cedar-fftw"               = "cedar_fftw",
   "cosivina"                 = "cosivina",
+  "cosivina-fft"             = "cosivina_fft",
   "cosivina-python-fft"      = "cpy_fft",
   "cosivina-python-numba"    = "cpy_numba",
   "cosivina-python-nonumba"  = "cpy_nonumba",
@@ -189,15 +195,16 @@ VAR_TOKEN <- c(
 
 # Algebraic equivalence is only meaningful WITHIN the same activation-function
 # family (comparing different operators must differ by design). For each family,
-# emit every C(n,2) variant pair → 3 (AbsSig) + 3 (Heaviside) + 21 (Sigmoid) = 27.
+# emit every C(n,2) variant pair → 3 (AbsSig) + 3 (Heaviside) + 28 (Sigmoid) = 34.
 # Sigmoid includes cedar-opencv/cedar-fftw (fair kernel-parity + ExpSigmoid fix let
-# Cedar run the plain-logistic variant) and the spectral cosivina-python-fft variant
-# (7 variants → C(7,2)=21 pairs).
+# Cedar run the plain-logistic variant) and the two spectral variants,
+# cosivina-fft (MATLAB) and cosivina-python-fft (8 variants → C(8,2)=28 pairs).
 families <- list(
   abssigmoid_b100 = c("cedar-opencv", "cedar-fftw", "dnfc"),
   heaviside       = c("cedar-opencv", "cedar-fftw", "dnfc"),
-  sigmoid_b100    = c("cedar-opencv", "cedar-fftw", "cosivina", "cosivina-python-fft",
-                      "cosivina-python-numba", "cosivina-python-nonumba", "dnfc")
+  sigmoid_b100    = c("cedar-opencv", "cedar-fftw", "cosivina", "cosivina-fft",
+                      "cosivina-python-fft", "cosivina-python-numba",
+                      "cosivina-python-nonumba", "dnfc")
 )
 
 pairs_list <- list()
@@ -282,15 +289,22 @@ PAIR_LABELS <- c(
   # Sigmoid family
   cedar_opencv_vs_cedar_fftw_sigmoid_b100    = "Cedar-OpenCV vs Cedar-FFTW (Sig)",
   cedar_opencv_vs_cosivina_sigmoid_b100      = "Cedar-OpenCV Sig vs Cosivina Sig",
+  cedar_opencv_vs_cosivina_fft_sigmoid_b100  = "Cedar-OpenCV Sig vs Cosivina-fft Sig",
   cedar_opencv_vs_cpy_fft_sigmoid_b100       = "Cedar-OpenCV Sig vs Cosivina-Python FFT Sig",
   cedar_opencv_vs_cpy_numba_sigmoid_b100     = "Cedar-OpenCV Sig vs Cosivina-Python numba Sig",
   cedar_opencv_vs_cpy_nonumba_sigmoid_b100   = "Cedar-OpenCV Sig vs Cosivina-Python nonumba Sig",
   cedar_opencv_vs_dnfc_sigmoid_b100          = "Cedar-OpenCV Sig vs dnfc Sig",
   cedar_fftw_vs_cosivina_sigmoid_b100        = "Cedar-FFTW Sig vs Cosivina Sig",
+  cedar_fftw_vs_cosivina_fft_sigmoid_b100    = "Cedar-FFTW Sig vs Cosivina-fft Sig",
   cedar_fftw_vs_cpy_fft_sigmoid_b100         = "Cedar-FFTW Sig vs Cosivina-Python FFT Sig",
   cedar_fftw_vs_cpy_numba_sigmoid_b100       = "Cedar-FFTW Sig vs Cosivina-Python numba Sig",
   cedar_fftw_vs_cpy_nonumba_sigmoid_b100     = "Cedar-FFTW Sig vs Cosivina-Python nonumba Sig",
   cedar_fftw_vs_dnfc_sigmoid_b100            = "Cedar-FFTW Sig vs dnfc Sig",
+  cosivina_vs_cosivina_fft_sigmoid_b100      = "Cosivina Sig vs Cosivina-fft Sig",
+  cosivina_fft_vs_cpy_fft_sigmoid_b100       = "Cosivina-fft Sig vs Cosivina-Python FFT Sig",
+  cosivina_fft_vs_cpy_numba_sigmoid_b100     = "Cosivina-fft vs Cosivina-Python numba (Sig)",
+  cosivina_fft_vs_cpy_nonumba_sigmoid_b100   = "Cosivina-fft vs Cosivina-Python nonumba (Sig)",
+  cosivina_fft_vs_dnfc_sigmoid_b100          = "Cosivina-fft Sig vs dnfc Sig",
   cosivina_vs_cpy_fft_sigmoid_b100           = "Cosivina Sig vs Cosivina-Python FFT Sig",
   cosivina_vs_cpy_numba_sigmoid_b100         = "Cosivina vs Cosivina-Python numba (Sig)",
   cosivina_vs_cpy_nonumba_sigmoid_b100       = "Cosivina vs Cosivina-Python nonumba (Sig)",
@@ -319,7 +333,7 @@ if (nrow(metrics) > 0) {
     labs(y = NULL, x = expression(max*"|"*Delta*u*"|"*" (log scale)"),
          fill = "Phase",
          title = "Pointwise deviation between frameworks",
-         subtitle = paste("100 simulations x 27 same-activation comparison pairs, by architecture type",
+         subtitle = paste("100 simulations x 34 same-activation comparison pairs, by architecture type",
                           "· dashed lines = float64 (1e-4) / float32 (2e-4) thresholds")) +
     theme_minimal(base_family = "EB Garamond", base_size = 11) +
     theme(legend.position = "bottom",
@@ -519,9 +533,9 @@ by_type <- qual_check %>%
 print(as.data.frame(by_type[, c("type","pair","n","agree","pct")]), digits = 4)
 
 cat("\n  Interpretation:\n")
-cat("    All 100 simulations × 27 comparison pairs produce the same qualitative\n")
+cat("    All 100 simulations × 34 comparison pairs produce the same qualitative\n")
 cat("    field state (suprathreshold bump vs. subthreshold resting state) across\n")
-cat("    all seven variants, confirming behavioural reliability.\n\n")
+cat("    all eight variants, confirming behavioural reliability.\n\n")
 
 # ── 3. Per-pair precision summary + validation CSV ──────────────────────────
 
