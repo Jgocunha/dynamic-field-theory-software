@@ -3,8 +3,8 @@
 # Runs the full 2D matrix SERIALLY:
 #   7 variants (dnfc, cedar-opencv, cedar-fftw, cpy-numba, cpy-nonumba, cpy-fft)
 #   x 4 regimes (detection, selection, memory, multi-peak)
-#   x 2 grids (100, 200)
-#   x N {5,10,50,100} x 5 runs (2000 timed steps)   [cosivina MATLAB run separately]
+#   x 3 grids (100, 200, 500)
+#   x N {5,10,50,100} x 10 runs (500 timed steps)   [cosivina MATLAB run separately]
 #
 # The Cedar exes ONLY run reliably when launched from PowerShell with the Cedar
 # DLLs on PATH — do NOT launch them from Git Bash (they silent-exit).
@@ -15,6 +15,19 @@
 # Single-instance guard via lockdir. Appends per-cell, so a crash/reboot only loses
 # the in-progress cell; re-running resumes cleanly ONLY IF you first remove any
 # partial cell (see handoff doc "Resuming after interruption").
+#
+# Scope params (Archs/NList/GridSizes/TimedSteps/NRuns/DataDir) default to the full sweep
+# above; pass narrower values (e.g. for a quick smoke test) without touching the hardcoded
+# defaults.
+
+param(
+  [string[]]$Archs     = @("detection","selection","memory","multi-peak"),
+  [string]  $NList     = "5,10,50,100",
+  [int[]]   $GridSizes = @(100,200,500),
+  [int]     $TimedSteps = 500,
+  [int]     $NRuns      = 10,
+  [string]  $DataDir   = "C:\dev-files\dynamic-field-theory-software\benchmarking-2d\data"
+)
 
 $ErrorActionPreference = "Continue"
 
@@ -52,20 +65,20 @@ try {
   $env:MKL_NUM_THREADS = "1"
 
   $CPY2D = "$ROOT\benchmarking-2d\runners\cosivina_python_benchmark_2d.py"
-  $D2    = "$ROOT\benchmarking-2d\data"
-  $ARCHS = @("detection","selection","memory","multi-peak")
-  $NCSV  = "5,10,50,100"
+  $D2    = $DataDir
+  $ARCHS = $Archs
+  $NCSV  = $NList
 
-  Write-Output "===== 2D SERIAL (2000 steps / 5 runs, grids 100,200) ====="
-  foreach ($g in 100,200) {
+  Write-Output "===== 2D SERIAL ($TimedSteps steps / $NRuns runs, grids $($GridSizes -join ',')) ====="
+  foreach ($g in $GridSizes) {
     foreach ($a in $ARCHS) {
       Write-Output "----- grid=$g arch=$a  ($(Get-Date)) -----"
-      & "$DNFC\benchmark_headless_2d.exe" "$D2\timings-dnfc-2d.csv"  $a $NCSV $g
-      & "$CEDAR\benchmark_2d.exe"         "$D2\timings-cedar-2d.csv" $a opencv $NCSV $g
-      & "$CEDAR\benchmark_2d.exe"         "$D2\timings-cedar-2d.csv" $a fftw   $NCSV $g
-      & python "$CPY2D" $a numba   $NCSV $g
-      & python "$CPY2D" $a nonumba $NCSV $g
-      & python "$CPY2D" $a fft     $NCSV $g
+      & "$DNFC\benchmark_headless_2d.exe" "$D2\timings-dnfc-2d.csv"  $a $NCSV $g $TimedSteps $NRuns
+      & "$CEDAR\benchmark_2d.exe"         "$D2\timings-cedar-2d.csv" $a opencv $NCSV $g $TimedSteps $NRuns
+      & "$CEDAR\benchmark_2d.exe"         "$D2\timings-cedar-2d.csv" $a fftw   $NCSV $g $TimedSteps $NRuns
+      & python "$CPY2D" $a numba   $NCSV $g "$D2\timings-cosivina-python-2d.csv" $TimedSteps $NRuns
+      & python "$CPY2D" $a nonumba $NCSV $g "$D2\timings-cosivina-python-2d.csv" $TimedSteps $NRuns
+      & python "$CPY2D" $a fft     $NCSV $g "$D2\timings-cosivina-python-2d.csv" $TimedSteps $NRuns
     }
   }
   Write-Output "===== ALLDONE2D  ($(Get-Date)) ====="

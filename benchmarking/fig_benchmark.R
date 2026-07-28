@@ -196,7 +196,7 @@ p_throughput <- ggplot(
 ggsave(
   file.path(ROOT, "fig_benchmark_throughput.png"),
   p_throughput,
-  width = 9, height = 7, dpi = 150, bg = "white"
+  width = 13, height = 7, dpi = 150, bg = "white"
 )
 cat("Saved: fig_benchmark_throughput.png\n")
 
@@ -237,7 +237,7 @@ if (nrow(speedup_df) > 0) {
       linewidth = 0.4, colour = "grey25"
     ) +
     geom_hline(yintercept = 1, linetype = "dashed", colour = "grey30", linewidth = 0.6) +
-    facet_wrap(~ size_label, ncol = 2, scales = "free_y") +
+    facet_wrap(~ size_label, ncol = 3, scales = "free_y") +
     geom_text(
       aes(label = sprintf("%.1f×", speedup)),
       position = position_dodge(width = 0.78),
@@ -270,7 +270,7 @@ if (nrow(speedup_df) > 0) {
   ggsave(
     file.path(ROOT, "fig_benchmark_speedup.png"),
     p_speedup,
-    width = 9, height = 5, dpi = 150, bg = "white"
+    width = 13, height = 5, dpi = 150, bg = "white"
   )
   cat("Saved: fig_benchmark_speedup.png\n")
 } else {

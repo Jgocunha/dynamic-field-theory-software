@@ -1,7 +1,7 @@
 # DFT Framework Benchmark Report (1D)
 
 Throughput (steps/second) of **N independent 1D neural fields** across seven framework
-variants, swept over four canonical DFT regimes and two field sizes. The 2D
+variants, swept over four canonical DFT regimes and three field sizes. The 2D
 counterpart lives in [`../benchmarking-2d/`](../benchmarking-2d/).
 
 ## Test Machine
@@ -37,15 +37,15 @@ was applied (single-threaded workloads do not require it).
 Each run creates **N independent neural fields** (N ∈ {5, 10, 50, 100}), tiled copies of one
 **canonical DFT regime**, and times the integration loop. The matrix is fully crossed:
 
-**7 variants × 4 regimes × 2 field sizes × 4 N × 5 runs.**
+**7 variants × 4 regimes × 3 field sizes × 4 N × 10 runs.**
 
 | Axis | Values |
 |---|---|
 | Framework variants | dnfc · Cedar (OpenCV) · Cedar (FFTW) · Cosivina (MATLAB) · cosivina-python (numba) · cosivina-python (NumPy) · cosivina-python (FFT) |
 | Canonical regimes | detection · selection · memory · multi-peak |
-| Field size (1D) | 100, 500 cells |
+| Field size (1D) | 100, 500, 1000 cells |
 | N (independent fields) | 5, 10, 50, 100 |
-| Runs per cell | 5 (warm-up: 200 steps, discarded; timed: 2 000 steps) |
+| Runs per cell | 10 (warm-up: 200 steps, discarded; timed: 500 steps) |
 
 **Canonical regimes** reuse the representative parameters of the cross-platform-validation suite:
 
@@ -76,7 +76,7 @@ logistic sigmoid; Cedar is configured with `cedar.aux.math.ExpSigmoid`, algebrai
 earlier protocol revision used Cedar's `AbsSigmoid` here, which never reached winner-take-all.
 
 **The *memory* regime uses a two-phase protocol** in every framework: the stimulus is applied for
-100 steps to establish the bump, then removed before the timed 2 000-step window begins. This
+100 steps to establish the bump, then removed before the timed 500-step window begins. This
 measures genuine self-sustained memory maintenance, not stimulus-driven integration.
 
 **Position scaling:** kernel σ values are absolute (a fixed interaction range), held constant across
@@ -84,7 +84,7 @@ field sizes; only stimulus/kernel *positions* scale with field size so each regi
 on a larger grid.
 
 **Timing protocol:** only the step loop is timed (build, `init`, file I/O excluded). Reported value is
-the **median of 5 runs**, with a **95% confidence interval on the mean** (t-interval) in
+the **median of 10 runs**, with a **95% confidence interval on the mean** (t-interval) in
 `data/benchmark_summary.csv` and drawn as the ribbon / error bars in the figures.
 
 See [`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) for the full set of trade-off caveats
@@ -95,13 +95,13 @@ See [`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) for the full set of tra
 ## Results
 
 Measured at the fair protocol described above: matched kernel tap count, matched activation
-function, two-phase memory. All seven variants, all four regimes, both field sizes.
+function, two-phase memory. All seven variants, all four regimes, all three field sizes.
 
 ![Throughput](fig_benchmark_throughput.png)
 
 ![Speedup](fig_benchmark_speedup.png)
 
-### Table 1 — Median steps/second at N=100 (5 runs)
+### Table 1 — Median steps/second at N=100 (10 runs)
 
 Columns are *regime @ field size*. Higher is faster. See `data/benchmark_summary.csv` for per-cell
 mean, SD, and 95% CI.
@@ -164,7 +164,7 @@ and figures with `Rscript analysis.R` and `Rscript fig_benchmark.R`.
 
 | Data file | Variants | Rows |
 |---|---|---:|
-| `data/timings-dnfc.csv` | dnfc | 160 |
-| `data/timings-cedar.csv` | OpenCV + FFTW | 320 |
-| `data/timings-cosivina-python.csv` | numba + NumPy + FFT | 480 |
-| `data/timings-cosivina.csv` | Cosivina (MATLAB) | 160 |
+| `data/timings-dnfc.csv` | dnfc | 480 |
+| `data/timings-cedar.csv` | OpenCV + FFTW | 960 |
+| `data/timings-cosivina-python.csv` | numba + NumPy + FFT | 1440 |
+| `data/timings-cosivina.csv` | Cosivina (MATLAB) | 960 |

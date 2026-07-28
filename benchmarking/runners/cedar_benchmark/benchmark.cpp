@@ -10,8 +10,9 @@
 //
 // Build: registered via cedar_add_executable in the sibling CMakeLists.txt.
 //
-// Usage: benchmark [output_csv] [arch] [variant] [N_csv] [field_size]
+// Usage: benchmark [output_csv] [arch] [variant] [N_csv] [field_size] [timed_steps] [n_runs]
 //   output_csv defaults to "timings-cedar.csv"; variant: opencv (default) | fftw
+//   timed_steps: timed steps per run (default 2000); n_runs: runs per N (default 5)
 //
 // Output rows (no header, 8 columns):
 //   cedar,<variant>,<arch>,<field_size>,headless,<N>,<run>,<steps_per_second>
@@ -216,7 +217,8 @@ static std::string build_architecture_json(int n, const Arch& arch, const std::s
 // ---------------------------------------------------------------------------
 
 static void run_benchmark(int n, const Arch& arch, const std::string& variant,
-                          int field_size, const std::string& outfile)
+                          int field_size, const std::string& outfile,
+                          int timedSteps, int nRuns)
 {
     // Write the architecture to a temp JSON and load it.
     const fs::path tmp = fs::temp_directory_path() /
@@ -287,18 +289,18 @@ static void run_benchmark(int n, const Arch& arch, const std::string& variant,
     std::FILE* fp = std::fopen(outfile.c_str(), "a");
     if (!fp) { std::fprintf(stderr, "Cannot open %s\n", outfile.c_str()); return; }
 
-    for (int run = 1; run <= N_RUNS; ++run) {
+    for (int run = 1; run <= nRuns; ++run) {
         // Re-initialize to resting state before each timed run so runs 2..N do not
         // continue from the evolved state of run 1 (mirrors dnfc / Cosivina, which
         // call init() per run).
         reset_all();
         if (arch.name == "memory") establish_memory_bump();
         auto t0 = std::chrono::high_resolution_clock::now();
-        for (int t = 0; t < TIMED_STEPS; ++t) step_all();
+        for (int t = 0; t < timedSteps; ++t) step_all();
         auto t1 = std::chrono::high_resolution_clock::now();
 
         const double elapsed = std::chrono::duration<double>(t1 - t0).count();
-        const double sps     = TIMED_STEPS / elapsed;
+        const double sps     = timedSteps / elapsed;
         std::fprintf(fp,  "cedar,%s,%s,%d,headless,%d,%d,%.2f\n",
                      variant.c_str(), arch.name.c_str(), field_size, n, run, sps);
         std::printf("cedar/%-6s %-12s fs=%4d N=%4d run=%d  %.1f steps/s\n",
@@ -338,10 +340,12 @@ int main(int argc, char* argv[])
     }
 
     const int field_size = (argc > 5) ? std::stoi(argv[5]) : BASE_SIZE;
+    const int timedSteps = (argc > 6) ? std::stoi(argv[6]) : TIMED_STEPS;
+    const int nRuns      = (argc > 7) ? std::stoi(argv[7]) : N_RUNS;
 
     std::printf("Cedar headless benchmark [arch=%s variant=%s fs=%d] (real API, cv threads=0) -> %s\n",
                 arch.name.c_str(), variant.c_str(), field_size, outfile.c_str());
     for (int n : Ns)
-        run_benchmark(n, arch, variant, field_size, outfile);
+        run_benchmark(n, arch, variant, field_size, outfile, timedSteps, nRuns);
     return 0;
 }

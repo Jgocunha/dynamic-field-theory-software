@@ -12,7 +12,7 @@ Output rows (no header, 8 columns):
 
 Usage:
   cd benchmarking-2d
-  python runners/cosivina_python_benchmark_2d.py [arch] [variant] [N_csv] [grid]
+  python runners/cosivina_python_benchmark_2d.py [arch] [variant] [N_csv] [grid] [output_path] [timed_steps] [n_runs]
 """
 
 import os
@@ -52,8 +52,8 @@ def load_cosivina(variant: str):
 BASE_GRID    = 50      # reference grid side the arch positions are defined on
 NOISE_AMP    = 0.1     # benchmark uses A>0 so the RNG cost is measured
 WARMUP_STEPS = 200
-TIMED_STEPS  = 2000
-N_RUNS       = 5
+TIMED_STEPS  = 500
+N_RUNS       = 10
 N_VALUES     = [5, 10, 50, 100]
 
 # Architecture definitions (2D) — representative validation sim of each band
@@ -164,11 +164,14 @@ def establish_then_remove_stimulus(stimuli, sim):
 
 
 def main():
-    # Usage: cosivina_python_benchmark_2d.py [arch] [variant] [N_csv] [grid_side]
+    # Usage: cosivina_python_benchmark_2d.py [arch] [variant] [N_csv] [grid_side] [output_path] [timed_steps] [n_runs]
     #   arch        detection|selection|memory|multi-peak (default detection)
     #   variant     numba|nonumba  (default numba)
     #   N_csv       comma-separated field counts (default 5,10,50,100)
     #   grid_side   field side length, NxN grid (default 50)
+    #   output_path CSV to append to (default data/timings-cosivina-python-2d.csv)
+    #   timed_steps timed steps per run (default 2000)
+    #   n_runs      runs per N (default 5)
     arch_name = sys.argv[1] if len(sys.argv) > 1 else "detection"
     if arch_name not in ARCHS:
         print(f"Unknown arch '{arch_name}'; defaulting to detection")
@@ -181,10 +184,13 @@ def main():
     n_values = ([int(x) for x in sys.argv[3].split(",") if x]
                 if len(sys.argv) > 3 else N_VALUES)
     grid = int(sys.argv[4]) if len(sys.argv) > 4 else BASE_GRID
+    output = Path(sys.argv[5]) if len(sys.argv) > 5 else OUTPUT
+    timed_steps = int(sys.argv[6]) if len(sys.argv) > 6 else TIMED_STEPS
+    n_runs = int(sys.argv[7]) if len(sys.argv) > 7 else N_RUNS
 
     load_cosivina(variant)
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
 
     # Report the pinned thread environment for reproducibility.
     print("Thread pinning:", {v: os.environ.get(v) for v in
@@ -196,9 +202,9 @@ def main():
         except Exception:
             pass
 
-    print(f"cosivina-python 2D headless benchmark [arch={arch_name} variant={variant} grid={grid}x{grid}] -> {OUTPUT}")
+    print(f"cosivina-python 2D headless benchmark [arch={arch_name} variant={variant} grid={grid}x{grid}] -> {output}")
 
-    with open(OUTPUT, "a") as fid:
+    with open(output, "a") as fid:
         for n in n_values:
             print(f"=== cosivina-python/{variant} 2D  {arch_name}  grid={grid}x{grid}  N={n} ===")
 
@@ -217,20 +223,20 @@ def main():
             for _ in range(WARMUP_STEPS):
                 sim.step()
 
-            for r in range(1, N_RUNS + 1):
+            for r in range(1, n_runs + 1):
                 sim.init()
                 if arch_name == "memory":
                     establish_then_remove_stimulus(stimuli, sim)
                 t0 = time.perf_counter()
-                for _ in range(TIMED_STEPS):
+                for _ in range(timed_steps):
                     sim.step()
                 elapsed = time.perf_counter() - t0
-                sps = TIMED_STEPS / elapsed
+                sps = timed_steps / elapsed
                 fid.write(f"cosivina-python,{variant},{arch_name},{grid},headless,{n},{r},{sps:.2f}\n")
                 fid.flush()
                 print(f"  headless  run={r}  {sps:.1f} steps/s")
 
-    print(f"\nDone. Results appended to {OUTPUT}")
+    print(f"\nDone. Results appended to {output}")
 
 
 if __name__ == "__main__":

@@ -29,18 +29,30 @@ end
 
 SCRIPT_DIR  = fileparts(mfilename('fullpath'));
 DATA_DIR    = fullfile(SCRIPT_DIR, '..', 'data');
-OUTPUT_FILE = fullfile(DATA_DIR, 'timings-cosivina-2d.csv');
+if ~exist('OUTPUT_FILE', 'var')
+    OUTPUT_FILE = fullfile(DATA_DIR, 'timings-cosivina-2d.csv');
+end
 
 WARMUP_STEPS = 200;
-TIMED_STEPS  = 2000;
-N_RUNS       = 5;
+if ~exist('TIMED_STEPS', 'var')
+    TIMED_STEPS = 500;
+end
+if ~exist('N_RUNS', 'var')
+    N_RUNS = 10;
+end
 NOISE_AMP    = 0.1;    % benchmark uses A>0 so the RNG cost is measured
 BASE_GRID    = 50;     % reference grid side the arch positions are defined on
 
 % Architecture x N x grid-size matrix: 4 canonical archs, across N and grid side.
-ARCH_LIST    = {'detection', 'selection', 'memory', 'multi-peak'};
-ARCH_N       = [5, 10, 50, 100];
-GRID_SIZES   = [100, 200];
+if ~exist('ARCH_LIST', 'var')
+    ARCH_LIST = {'detection', 'selection', 'memory', 'multi-peak'};
+end
+if ~exist('ARCH_N', 'var')
+    ARCH_N = [5, 10, 50, 100];
+end
+if ~exist('GRID_SIZES', 'var')
+    GRID_SIZES = [100, 200, 500];
+end
 
 if ~exist(DATA_DIR, 'dir')
     mkdir(DATA_DIR);

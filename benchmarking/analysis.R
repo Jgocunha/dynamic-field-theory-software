@@ -2,7 +2,7 @@
 #
 # Reads four per-framework CSV files and produces, per architecture:
 #   - steps/second for each framework VARIANT × N
-#   - 95% CI on the mean (t-interval over the 5 runs/cell)
+#   - 95% CI on the mean (t-interval over the 10 runs/cell)
 #   - speedup ratios relative to Cosivina (MATLAB)
 #
 # Variants compared: cosivina (MATLAB), cosivina-python (numba | nonumba),
@@ -79,7 +79,7 @@ summary_df <- timings %>%
     sd_sps     = sd(steps_per_second),
     n_runs     = n(),
     sem_sps    = sd(steps_per_second) / sqrt(n()),
-    # 95% CI on the mean (t-interval; valid for the 5 runs collected per cell).
+    # 95% CI on the mean (t-interval; valid for the 10 runs collected per cell).
     ci95_lo    = ifelse(n() > 1,
                         mean(steps_per_second) - qt(0.975, n() - 1) * sd(steps_per_second) / sqrt(n()),
                         NA_real_),
@@ -109,7 +109,7 @@ for (a in archs_present) {
       select(fwv, N, label) %>%
       pivot_wider(names_from = N, values_from = label, names_prefix = "N=") %>%
       arrange(fwv)
-    cat("--- median steps/second (5 runs) ---\n")
+    cat("--- median steps/second (10 runs) ---\n")
     print(as.data.frame(wide))
 
     detail <- sub %>%

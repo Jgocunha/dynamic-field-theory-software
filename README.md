@@ -49,8 +49,8 @@ full activation-function equivalence table across frameworks.
 
 | Directory | Contents |
 |---|---|
-| [`benchmarking/`](benchmarking/README.md) | Performance benchmark (1D): N independent neural fields (N ∈ {5, 10, 50, 100}) across 4 canonical regimes and 2 field sizes, measuring simulation steps per second |
-| [`benchmarking-2d/`](benchmarking-2d/README.md) | Same performance benchmark on 2D (100×100 / 200×200) fields |
+| [`benchmarking/`](benchmarking/README.md) | Performance benchmark (1D): N independent neural fields (N ∈ {5, 10, 50, 100}) across 4 canonical regimes and 3 field sizes, measuring simulation steps per second |
+| [`benchmarking-2d/`](benchmarking-2d/README.md) | Same performance benchmark on 2D (100×100 / 200×200 / 500×500) fields |
 | [`cross-platform-validation/`](cross-platform-validation/README.md) | Correctness study (1D): 100 DFT simulations across 5 architectures, verifying algebraic equivalence and behavioural reliability |
 | [`cross-platform-validation-2d/`](cross-platform-validation-2d/README.md) | Same correctness study on 2D (50×50) fields |
 
@@ -59,8 +59,8 @@ full activation-function equivalence table across frameworks.
 ## Benchmark Results (1D)
 
 Each benchmark creates N independent neural fields (N ∈ {5, 10, 50, 100}), across 4 canonical
-regimes (detection, selection, memory, multi-peak) and 2 field sizes, and measures wall-clock steps
-per second (median of 5 runs × 2 000 steps each). The five spatial variants convolve the same real
+regimes (detection, selection, memory, multi-peak) and 3 field sizes, and measures wall-clock steps
+per second (median of 10 runs × 500 steps each). The five spatial variants convolve the same real
 kernel support and all variants use matched activation functions (the two spectral variants —
 Cedar-FFTW and cosivina-python-FFT — convolve the full field in the Fourier domain; see
 `TRADE_OFF_CAVEATS.md` and `benchmarking/README.md` *Benchmark Design* for how).
@@ -88,8 +88,8 @@ and statistical detail.
 
 ## Benchmark Results (2D)
 
-The same regime × N sweep on **2D (100×100 or 200×200) fields**, where the lateral convolution
-dominates each step. All seven variants, all four regimes, both grid sizes.
+The same regime × N sweep on **2D (100×100, 200×200, or 500×500) fields**, where the lateral
+convolution dominates each step. All seven variants, all four regimes, all three grid sizes.
 
 ### Steps per second at N=100 (median across regimes' range)
 

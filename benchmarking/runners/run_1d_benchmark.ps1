@@ -3,14 +3,27 @@
 # Runs the full 1D matrix SERIALLY:
 #   7 variants (dnfc, cedar-opencv, cedar-fftw, cpy-numba, cpy-nonumba, cpy-fft)
 #   x 4 regimes (detection, selection, memory, multi-peak)
-#   x 2 field sizes (100, 500)
-#   x N {5,10,50,100} x 5 runs (2000 timed steps)   [cosivina MATLAB run separately]
+#   x 3 field sizes (100, 500, 1000)
+#   x N {5,10,50,100} x 10 runs (500 timed steps)   [cosivina MATLAB run separately]
 #
 # See the sibling 2D driver (benchmarking-2d/runners/run_2d_benchmark.ps1) and the handoff
 # doc (.claude/reports/fast-pc-benchmark-handoff.md). Same conventions: Cedar exes MUST run
 # from PowerShell (silent-exit under Git Bash); single-instance lockdir; appends per-cell.
 #
 # BEFORE RUNNING: edit the PATH VARIABLES below, run the pre-flight checks in the handoff doc.
+#
+# Scope params (Archs/NList/FieldSizes/TimedSteps/NRuns/DataDir) default to the full sweep
+# above; pass narrower values (e.g. for a quick smoke test) without touching the hardcoded
+# defaults.
+
+param(
+  [string[]]$Archs      = @("detection","selection","memory","multi-peak"),
+  [string]  $NList      = "5,10,50,100",
+  [int[]]   $FieldSizes  = @(100,500,1000),
+  [int]     $TimedSteps = 500,
+  [int]     $NRuns      = 10,
+  [string]  $DataDir    = "C:\dev-files\dynamic-field-theory-software\benchmarking\data"
+)
 
 $ErrorActionPreference = "Continue"
 
@@ -44,20 +57,20 @@ try {
   $env:MKL_NUM_THREADS = "1"
 
   $CPY1D = "$ROOT\benchmarking\runners\cosivina_python_benchmark.py"
-  $D1    = "$ROOT\benchmarking\data"
-  $ARCHS = @("detection","selection","memory","multi-peak")
-  $NCSV  = "5,10,50,100"
+  $D1    = $DataDir
+  $ARCHS = $Archs
+  $NCSV  = $NList
 
-  Write-Output "===== 1D SERIAL (2000 steps / 5 runs, field sizes 100,500) ====="
-  foreach ($fs in 100,500) {
+  Write-Output "===== 1D SERIAL ($TimedSteps steps / $NRuns runs, field sizes $($FieldSizes -join ',')) ====="
+  foreach ($fs in $FieldSizes) {
     foreach ($a in $ARCHS) {
       Write-Output "----- fs=$fs arch=$a  ($(Get-Date)) -----"
-      & "$DNFC\benchmark_headless.exe" "$D1\timings-dnfc.csv"   $a $NCSV $fs
-      & "$CEDAR\benchmark.exe"         "$D1\timings-cedar.csv"  $a opencv $NCSV $fs
-      & "$CEDAR\benchmark.exe"         "$D1\timings-cedar.csv"  $a fftw   $NCSV $fs
-      & python "$CPY1D" $a numba   $NCSV $fs
-      & python "$CPY1D" $a nonumba $NCSV $fs
-      & python "$CPY1D" $a fft     $NCSV $fs
+      & "$DNFC\benchmark_headless.exe" "$D1\timings-dnfc.csv"   $a $NCSV $fs $TimedSteps $NRuns
+      & "$CEDAR\benchmark.exe"         "$D1\timings-cedar.csv"  $a opencv $NCSV $fs $TimedSteps $NRuns
+      & "$CEDAR\benchmark.exe"         "$D1\timings-cedar.csv"  $a fftw   $NCSV $fs $TimedSteps $NRuns
+      & python "$CPY1D" $a numba   $NCSV $fs "$D1\timings-cosivina-python.csv" $TimedSteps $NRuns
+      & python "$CPY1D" $a nonumba $NCSV $fs "$D1\timings-cosivina-python.csv" $TimedSteps $NRuns
+      & python "$CPY1D" $a fft     $NCSV $fs "$D1\timings-cosivina-python.csv" $TimedSteps $NRuns
     }
   }
   Write-Output "===== ALLDONE1D  ($(Get-Date)) ====="

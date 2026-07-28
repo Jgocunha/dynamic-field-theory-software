@@ -76,7 +76,7 @@ elements still use the direct path exclusively.
   combined exc+inh tap count exceeds 120 taps/cell. That threshold comes from equating
   the two paths' FLOP costs — direct ≈ 2 × taps × cells, spectral ≈ 2 × (5 × cells ×
   log2(cells)) for a forward+inverse real FFT — which crosses at roughly 115–130
-  taps/cell for the grid sizes this benchmark uses (100×100, 200×200). It was **not**
+  taps/cell for the grid sizes this benchmark uses (100×100, 200×200, 500×500). It was **not**
   fitted to this benchmark's own four regimes: only `memory` uses `MexicanHatKernel2D`
   at all, so `detection`/`selection`/`multi-peak` are structurally unaffected by this
   change regardless of where the threshold sits.
@@ -97,7 +97,7 @@ elements still use the direct path exclusively.
   confirming the FFT kernel construction (circular wrap-embedding, sign, centering) is
   correct, not merely "close." With noise enabled (as the benchmark itself runs), the two
   paths' final-activation trajectories diverge substantially (~10% relative) over the
-  full 2000-step run. This is **not** a defect in either path: `memory` is a self-sustained,
+  full 500-step run. This is **not** a defect in either path: `memory` is a self-sustained,
   marginally-stable bump attractor, and continuous stochastic forcing makes such a system
   chaotically sensitive to *any* valid numerical perturbation — the same mechanism behind
   the 049/050 fragility above, just triggered by noise instead of a reordering. Both
@@ -115,7 +115,7 @@ runner pins its math-library thread pools to 1; see the Test Machine table). Res
 depend on this specific CPU, its boost/thermal state, and the linked BLAS/FFT backend
 (NumPy/numba → the installed NumPy BLAS; MATLAB → its bundled libraries; Cedar/dnfc →
 MSVC. dnfc's own code is compiled with `/arch:AVX2`; Cedar's own code has no arch flag,
-but its OpenCV and FFTW backends dispatch AVX2+ at runtime regardless — see §4). Five
+but its OpenCV and FFTW backends dispatch AVX2+ at runtime regardless — see §4). Ten
 runs per cell (`analysis.R`/`analysis_2d.R` report median, SD, SEM, and a 95% CI per
 cell) quantify short-timescale run-to-run noise *on this machine*, not the generality
 of the result across hardware. **The cross-framework ratios are the finding; treat
@@ -190,7 +190,7 @@ source:
 
 - **Identical timed region.** All eight drivers (1D/2D × 4 frameworks) time a bare
   step-loop with no I/O, allocation, or metrics inside it.
-- **Identical protocol.** 200-step discarded warmup, 5 runs, per-run reset
+- **Identical protocol.** 200-step discarded warmup, 10 runs, per-run reset
   (`init()`/`callReset()`), and the same two-phase memory protocol (stimulus established,
   then removed) in every driver.
 - **Identical model parameters.** Field/grid sizes, τ, dt, stimulus/kernel amplitudes and
@@ -215,7 +215,7 @@ source:
   pass (`computeStateMetrics_`) is left on in the benchmark rather than disabled, so dnfc
   pays cost it did not have to.
 - **Identical measurement and reporting.** Same 8-column CSV schema, same wall-clock
-  steps-per-second formula, and the same median-of-5 statistic (with SD/SEM/95% CI) for
+  steps-per-second formula, and the same median-of-10 statistic (with SD/SEM/95% CI) for
   every variant; the R analysis/figure scripts apply no per-variant filtering.
 
 These controls establish the baseline against which §1 (precision), §4 (SIMD/build), and

@@ -11,8 +11,12 @@
 //
 // Build: registered via cedar_add_executable in the sibling CMakeLists.txt.
 //
-// Usage: benchmark_2d [output_csv] [arch] [variant] [N_csv] [grid]
+// Usage: benchmark_2d [output_csv] [arch] [variant] [N_csv] [grid] [timed_steps] [n_runs]
 //   output_csv defaults to "timings-cedar-2d.csv"; variant: opencv (default) | fftw
+//   timed_steps: timed steps per run (default 2000); n_runs: runs per N (default 5)
+//   Behavioral-validation dump mode: benchmark_2d [output_csv] [arch] [variant] [N_csv]
+//   [grid] [dump_path] [dump_steps] — argv[6] is treated as a dump path (not
+//   timed_steps) whenever it does not parse as an integer.
 //
 // Output rows (no header, 8 columns):
 //   cedar,<variant>,<arch>,<grid>,headless,<N>,<run>,<steps_per_second>
@@ -272,7 +276,8 @@ static void dump_final_field(const Arch& arch, const std::string& variant, int g
 // ---------------------------------------------------------------------------
 
 static void run_benchmark(int n, const Arch& arch, const std::string& variant,
-                          int grid, const std::string& outfile)
+                          int grid, const std::string& outfile,
+                          int timedSteps, int nRuns)
 {
     const fs::path tmp = fs::temp_directory_path() /
         ("cedar_bench2d_" + arch.name + "_" + variant + "_fs" + std::to_string(grid) +
@@ -338,18 +343,18 @@ static void run_benchmark(int n, const Arch& arch, const std::string& variant,
     std::FILE* fp = std::fopen(outfile.c_str(), "a");
     if (!fp) { std::fprintf(stderr, "Cannot open %s\n", outfile.c_str()); return; }
 
-    for (int run = 1; run <= N_RUNS; ++run) {
+    for (int run = 1; run <= nRuns; ++run) {
         // Re-initialize to resting state before each timed run so runs 2..N do not
         // continue from the evolved state of run 1 (mirrors dnfc / Cosivina, which
         // call init() per run).
         reset_all();
         if (arch.name == "memory") establish_memory_bump();
         auto t0 = std::chrono::high_resolution_clock::now();
-        for (int t = 0; t < TIMED_STEPS; ++t) step_all();
+        for (int t = 0; t < timedSteps; ++t) step_all();
         auto t1 = std::chrono::high_resolution_clock::now();
 
         const double elapsed = std::chrono::duration<double>(t1 - t0).count();
-        const double sps     = TIMED_STEPS / elapsed;
+        const double sps     = timedSteps / elapsed;
         std::fprintf(fp,  "cedar,%s,%s,%d,headless,%d,%d,%.2f\n",
                      variant.c_str(), arch.name.c_str(), grid, n, run, sps);
         std::printf("cedar 2D /%-6s %-12s fs=%dx%d N=%4d run=%d  %.1f steps/s\n",
@@ -357,6 +362,16 @@ static void run_benchmark(int n, const Arch& arch, const std::string& variant,
     }
     std::fclose(fp);
     std::error_code ec; fs::remove(tmp, ec);
+}
+
+static bool is_integer_literal(const std::string& s)
+{
+    if (s.empty()) return false;
+    std::size_t i = (s[0] == '-' || s[0] == '+') ? 1 : 0;
+    if (i >= s.size()) return false;
+    for (; i < s.size(); ++i)
+        if (s[i] < '0' || s[i] > '9') return false;
+    return true;
 }
 
 int main(int argc, char* argv[])
@@ -390,16 +405,21 @@ int main(int argc, char* argv[])
 
     const int grid = (argc > 5) ? std::stoi(argv[5]) : BASE_GRID;
 
-    if (argc > 6) {
+    // argv[6], if present, is either a dump path (behavioral-validation mode) or a
+    // timed_steps override for the real timing loop below — disambiguated by whether
+    // it parses as an integer literal (a dump path never does).
+    if (argc > 6 && !is_integer_literal(argv[6])) {
         // Behavioral-validation mode: dump field 0's final activation instead of timing.
         const int timedSteps = (argc > 7) ? std::stoi(argv[7]) : TIMED_STEPS;
         dump_final_field(arch, variant, grid, timedSteps, argv[6]);
         return 0;
     }
+    const int timedSteps = (argc > 6) ? std::stoi(argv[6]) : TIMED_STEPS;
+    const int nRuns      = (argc > 7) ? std::stoi(argv[7]) : N_RUNS;
 
     std::printf("Cedar 2D headless benchmark [arch=%s variant=%s grid=%dx%d] (real API, cv threads=0) -> %s\n",
                 arch.name.c_str(), variant.c_str(), grid, grid, outfile.c_str());
     for (int n : Ns)
-        run_benchmark(n, arch, variant, grid, outfile);
+        run_benchmark(n, arch, variant, grid, outfile, timedSteps, nRuns);
     return 0;
 }

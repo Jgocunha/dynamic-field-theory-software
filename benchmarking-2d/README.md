@@ -1,8 +1,8 @@
 # DFT Framework Benchmark Report (2D)
 
 The 2D counterpart of [`../benchmarking/`](../benchmarking/README.md). Same design and protocol,
-with each neural field promoted to a **100×100 or 200×200 grid** (10 000/40 000 cells vs 100/500 in
-1D). This is the regime where the lateral **convolution cost dominates**, so the framework ranking
+with each neural field promoted to a **100×100, 200×200, or 500×500 grid** (10 000/40 000/250 000
+cells vs 100/500/1000 in 1D). This is the regime where the lateral **convolution cost dominates**, so the framework ranking
 can differ from 1D — each framework's 2D convolution (OpenCV/FFTW vs direct separable, JIT vs
 interpreted) scales differently with the number of grid points.
 
@@ -37,15 +37,15 @@ Each run creates **N independent neural fields** (N ∈ {5, 10, 50, 100}), tiled
 **canonical DFT regime**, and times the integration loop — the same design as 1D, with each field
 promoted to a 2D grid. The matrix is fully crossed:
 
-**7 variants × 4 regimes × 2 grid sizes × 4 N × 5 runs.**
+**7 variants × 4 regimes × 3 grid sizes × 4 N × 10 runs.**
 
 | Axis | Values |
 |---|---|
 | Framework variants | dnfc · Cedar (OpenCV) · Cedar (FFTW) · Cosivina (MATLAB) · cosivina-python (numba) · cosivina-python (NumPy) · cosivina-python (FFT) |
 | Canonical regimes | detection · selection · memory · multi-peak |
-| Grid size (2D) | 100×100, 200×200 |
+| Grid size (2D) | 100×100, 200×200, 500×500 |
 | N (independent fields) | 5, 10, 50, 100 |
-| Runs per cell | 5 (warm-up: 200 steps, discarded; timed: 2 000 steps) |
+| Runs per cell | 10 (warm-up: 200 steps, discarded; timed: 500 steps) |
 
 **Canonical regimes** are the 2D-adjusted counterparts of the 1D regimes (positions scale with grid
 side, kernel σ values scale with the 2D amplitude adjustments used in cross-platform-validation):
@@ -68,7 +68,7 @@ identical to the other frameworks' logistic sigmoid; *memory* uses a two-phase p
 stimulus-on to establish the bump, then removed before the timed window) in every framework.
 
 **Timing protocol:** only the step loop is timed (build, `init`, file I/O excluded). Reported value
-is the **median of 5 runs**, with a **95% confidence interval on the mean** (t-interval) in
+is the **median of 10 runs**, with a **95% confidence interval on the mean** (t-interval) in
 `data/benchmark_summary.csv` and drawn as the ribbon / error bars in the figures.
 
 ## How to reproduce
@@ -81,7 +81,7 @@ is the **median of 5 runs**, with a **95% confidence interval on the mean** (t-i
      `benchmark_2d.exe <output_csv> <arch> <opencv|fftw> <N_csv> <grid>` with the dependency DLLs
      on PATH (see `../.claude/reports/cedar-notes.md`).
    - cosivina (MATLAB): `run('runners/cosivina_benchmark_2d.m')` (edit `ARCH_LIST`/`GRID_SIZES` to
-     scope a re-run; defaults to the full 4-regime × 2-grid matrix).
+     scope a re-run; defaults to the full 4-regime × 3-grid matrix).
    - cosivina-python: `python runners/cosivina_python_benchmark_2d.py <arch> <numba|nonumba|fft> <N_csv> <grid>`.
    - `run_2d_benchmark.ps1` drives the full matrix for dnfc/Cedar/cosivina-python in one call (must
      run from PowerShell — the Cedar exes silent-exit under Git Bash).
@@ -93,13 +93,13 @@ is the **median of 5 runs**, with a **95% confidence interval on the mean** (t-i
 ## Results
 
 Measured at the protocol described above: matched kernel tap count, matched activation
-function, two-phase memory. All seven variants, all four regimes, both grid sizes.
+function, two-phase memory. All seven variants, all four regimes, all three grid sizes.
 
 ![Throughput](fig_benchmark_throughput.png)
 
 ![Speedup](fig_benchmark_speedup.png)
 
-### Table 1 — Median steps/second at N=100 (5 runs)
+### Table 1 — Median steps/second at N=100 (10 runs)
 
 Columns are *regime @ grid*. Higher is faster. See `data/benchmark_summary.csv` for per-cell mean,
 SD, and 95% CI.
@@ -177,7 +177,7 @@ this caveat.
 
 | Data file | Variants | Rows |
 |---|---|---:|
-| `data/timings-dnfc-2d.csv` | dnfc | 160 |
-| `data/timings-cedar-2d.csv` | OpenCV + FFTW | 320 |
-| `data/timings-cosivina-python-2d.csv` | numba + NumPy + FFT | 480 |
-| `data/timings-cosivina-2d.csv` | Cosivina (MATLAB) | 160 |
+| `data/timings-dnfc-2d.csv` | dnfc | 480 |
+| `data/timings-cedar-2d.csv` | OpenCV + FFTW | 960 |
+| `data/timings-cosivina-python-2d.csv` | numba + NumPy + FFT | 1440 |
+| `data/timings-cosivina-2d.csv` | Cosivina (MATLAB) | 960 |

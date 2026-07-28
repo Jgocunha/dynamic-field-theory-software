@@ -1,4 +1,4 @@
-# analysis_2d.R — DFT Framework 2D Benchmark Analysis (100x100 / 200x200 fields)
+# analysis_2d.R — DFT Framework 2D Benchmark Analysis (100x100 / 200x200 / 500x500 fields)
 #
 # 2D counterpart of ../benchmarking/analysis.R. Reads the four per-framework
 # timing CSVs and produces, per architecture: median steps/second × N, 95% CI,
@@ -94,7 +94,7 @@ for (a in archs_present) {
       select(fwv, N, label) %>%
       pivot_wider(names_from = N, values_from = label, names_prefix = "N=") %>%
       arrange(fwv)
-    cat("--- median steps/second (5 runs) ---\n")
+    cat("--- median steps/second (10 runs) ---\n")
     print(as.data.frame(wide))
 
     detail <- sub %>%
