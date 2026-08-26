@@ -67,18 +67,20 @@ Cedar-FFTW and cosivina-python-FFT — convolve the full field in the Fourier do
 
 ### Steps per second at N=100 (median across regimes' range)
 
-| Framework (variant) | field=100 | field=500 |
-|---|---:|---:|
-| dnfc | 6 735–7 884 | 1 527–1 746 |
-| cosivina-python (numba) | 1 330–1 597 | 384–487 |
-| Cedar (FFTW) | 984–1 112 | 283–678 |
-| cosivina-python (NumPy) | 431–511 | 257–307 |
-| cosivina-python (FFT) | 296–329 | 212–240 |
-| Cedar (OpenCV) | 202–684 | 73–253 |
-| Cosivina (MATLAB) | 173–195 | 118–142 |
+| Framework (variant) | field=100 | field=500 | field=1000 |
+|---|---:|---:|---:|
+| dnfc | 8 695–10 629 | 1 921–2 367 | 1 028–1 240 |
+| cosivina-python (numba) | 1 343–1 591 | 393–487 | 193–260 |
+| Cedar (FFTW) | 987–1 122 | 479–680 | 297–455 |
+| Cosivina (MATLAB, FFT) | 755–864 | 433–513 | 278–340 |
+| Cosivina (MATLAB) | 716–867 | 348–478 | 216–317 |
+| cosivina-python (NumPy) | 435–518 | 248–288 | 168–195 |
+| Cedar (OpenCV) | 201–676 | 73–250 | 41–140 |
+| cosivina-python (FFT) | 309–331 | 200–227 | 140–170 |
 
-**dnfc is by far the fastest** in every regime (38–44× Cosivina at field=100, 12–13× at field=500),
-with **numba-JIT cosivina-python second** at both field sizes. See
+**dnfc is by far the fastest** in every regime (12.1–12.9× Cosivina at field=100, 5.0–5.5× at
+field=500, 3.7–4.8× at field=1000), with **numba-JIT cosivina-python second at field=100**, while
+**Cedar-FFTW takes second place at the two larger sizes**. See
 [`benchmarking/README.md`](benchmarking/README.md) for the full per-regime breakdown, methodology,
 and statistical detail.
 
@@ -89,21 +91,22 @@ and statistical detail.
 ## Benchmark Results (2D)
 
 The same regime × N sweep on **2D (100×100, 200×200, or 500×500) fields**, where the lateral
-convolution dominates each step. All seven variants, all four regimes, all three grid sizes.
+convolution dominates each step. All eight variants, all four regimes, all three grid sizes.
 
 ### Steps per second at N=100 (median across regimes' range)
 
-| Framework (variant) | grid=100 | grid=200 |
-|---|---:|---:|
-| dnfc | 42.2–63.6 | 10.8–15.7 |
-| Cosivina (MATLAB) | 16.4–38.6 | 5.3–12.6 |
-| Cedar (OpenCV) | 16.5–43.2 | 6.2–11.6 |
-| Cedar (FFTW) | 35.3–37.0 | 8.9–9.2 |
-| cosivina-python (numba) | 9.8–20.2 | 2.5–5.5 |
-| cosivina-python (FFT) | 25.1–25.9 | 6.6–6.8 |
-| cosivina-python (NumPy) | 2.7–5.3 | 1.1–2.1 |
+| Framework (variant) | grid=100 | grid=200 | grid=500 |
+|---|---:|---:|---:|
+| dnfc | 60.4–77.7 | 14.0–19.0 | 2.04–2.99 |
+| Cosivina (MATLAB, FFT) | 41.6–44.2 | 11.2–11.6 | 0.99–1.06 |
+| Cedar (OpenCV) | 16.3–41.7 | 6.2–11.7 | 1.08–1.76 |
+| Cosivina (MATLAB) | 17.2–38.6 | 5.2–12.6 | 0.61–1.17 |
+| Cedar (FFTW) | 34.9–35.8 | 8.9–9.2 | 1.09–1.12 |
+| cosivina-python (FFT) | 24.2–25.2 | 6.6–6.7 | 1.01–1.05 |
+| cosivina-python (numba) | 9.9–20.3 | 2.5–5.5 | 0.41–0.90 |
+| cosivina-python (NumPy) | 2.8–5.2 | 1.2–2.1 | 0.30–0.52 |
 
-**dnfc wins every regime at both grids**, but narrowly (1.2–2.6×) compared to 1D — 2D's
+**dnfc wins every regime at all three grids**, but narrowly (1.5–3.5×) compared to 1D — 2D's
 convolution-dominated step gives Cedar's and Cosivina's convolution paths much more room to
 compete. A genuinely surprising, investigated finding: **Cosivina (MATLAB) is competitive with, and
 sometimes beats, both Cedar engines** — traced to Cedar's general-framework overhead (locking,
