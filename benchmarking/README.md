@@ -16,7 +16,7 @@ counterpart lives in [`../benchmarking-2d/`](../benchmarking-2d/).
 | Release flags | `/O2 /Ob2 /DNDEBUG` (CMake Release) |
 | MATLAB version | R2024b, `maxNumCompThreads(1)` |
 | Python version | 3.11.9; numpy 2.2.1; numba 0.66.0 |
-| dnfc version | 2.9.3  |
+| dnfc version | 2.11.0  |
 | Cedar version | 6.2.0 — **both** convolution engines benchmarked: OpenCV (spatial) and FFTW (spectral); `cv::setNumThreads(0)` |
 | Cosivina version | 1.4.0 (MATLAB) |
 | cosivina-python version | 0.1.0 (numba JIT, pure-NumPy, and spectral `KernelFFT` paths all benchmarked) |
@@ -59,7 +59,7 @@ Each run creates **N independent neural fields** (N ∈ {5, 10, 50, 100}), tiled
 **Noise is on:** every field includes a `NormalNoise` term with **amplitude A = 0.1**, so per-step
 RNG cost is part of the measured workload.
 
-**Kernel cutoff is unified across the six spatial-convolution variants by real tap count, not by a
+**Kernel cutoff is unified across the five spatial-convolution variants by real tap count, not by a
 shared nominal parameter.** dnfc and cosivina/cosivina-python (numba/NumPy) use `cutoffFactor=5` — a
 kernel-*radius* multiplier (taps = 2·min(⌈5σ⌉, field-size cap)+1). Cedar's `limit` is a
 kernel-*width* multiplier (taps = ⌈limit·σ⌉, rounded to odd) — a different unit, so naively setting

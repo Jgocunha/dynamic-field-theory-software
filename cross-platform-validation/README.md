@@ -16,7 +16,7 @@
 | Compiler (Cedar / dnfc) | MSVC 19.44 (Visual Studio 2022 Community) |
 | MATLAB version | R2024b |
 | Python version | 3.11.9 |
-| dnfc version | 2.9.3 |
+| dnfc version | 2.11.0 |
 | Cedar version | 6.2.0 |
 | Cosivina version | 1.4.0 |
 | cosivina-python version | 0.1.0 (numba + nonumba paths) |
@@ -214,7 +214,7 @@ below, then every emitted row was executed and its qualitative behaviour verifie
 > **Heaviside** for the frameworks that support them (dnfc, Cedar).
 
 The 2D suite (`../cross-platform-validation-2d/test_suite_2d.md`) reuses this same 100-row table
-verbatim — only the embedding onto a 100×100 grid differs; see its README.
+verbatim — only the embedding onto a 50×50 grid differs; see its README.
 
 ---
 
@@ -329,7 +329,7 @@ variants overlaid):
 
 - The test suite uses Euler integration with Δt = τ = 25 ms (step size equals the time constant). More accurate integration (smaller Δt) would reduce accumulated error but was not the focus of this validation.
 - Noise is set to 0 in all simulations to isolate deterministic algebraic equivalence.
-- The validation covers 1D fields only. 2D and higher-dimensional fields are not included in this test suite.
+- This document covers the 1D validation suite only. The 2D counterpart lives in [`../cross-platform-validation-2d/`](../cross-platform-validation-2d/README.md); higher-dimensional fields are not included in either suite.
 
 ---
 

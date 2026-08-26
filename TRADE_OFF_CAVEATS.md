@@ -31,15 +31,16 @@ intrinsic property of the framework, not a confound:
 | Cedar (OpenCV engine)    | Direct spatial convolution (`cv::filter2D`, zero-pad + wrap) |
 | Cedar (FFTW engine)      | Spectral: FFT × FFT → inverse FFT (cyclic)      |
 | Cosivina (MATLAB)        | Direct spatial convolution (`conv2`, separable in 2D) |
+| Cosivina (MATLAB, FFT)   | Spectral: `KernelFFT` element, full untruncated field |
 | cosivina-python (numba)  | Direct spatial convolution (`np.convolve` / `parCircConv`), numba-JIT host code |
 | cosivina-python (nonumba)| Direct spatial convolution (`np.convolve` / `parCircConv`), pure NumPy |
 | cosivina-python (fft)    | Spectral: `KernelFFT` element, `rfft2(input) × rfft2(kernel)` → inverse FFT (cyclic, full untruncated kernel), pure NumPy |
 
-**Five of the seven variants convolve spatially with a truncated kernel; two are spectral —
-Cedar-FFTW (float32) and cosivina-python-fft (float64).** The cosivina-python-fft variant
-instantiates cosivina's spectral `KernelFFT` element; the numba/nonumba variants use the spatial
-`GaussKernel*` / `LateralInteractions*` elements. These are reported as a framework characteristic,
-not normalized away. Two important structural facts follow:
+**Five of the eight variants convolve spatially with a truncated kernel; three are spectral —
+Cedar-FFTW (float32), Cosivina (MATLAB, FFT) (float64), and cosivina-python-fft (float64).** The
+cosivina-python-fft variant instantiates cosivina's spectral `KernelFFT` element; the numba/nonumba
+variants use the spatial `GaussKernel*` / `LateralInteractions*` elements. These are reported as a
+framework characteristic, not normalized away. Two important structural facts follow:
 
 - **Two spatial-vs-spectral cross-overs are exposed:** Cedar-FFTW vs the spatial engines, and
   cosivina-python-fft vs its own spatial numba/nonumba siblings. Direct convolution cost grows with
@@ -67,9 +68,9 @@ identified as dnfc's weakest margin — see `benchmarking-2d/README.md`):** dnfc
 carries a second, spectral convolution path (`tools/fft_convolution.h`, FFTW3 — the
 same library Cedar-FFTW uses, so the comparison isolates framework overhead from
 FFT-library quality rather than confounding the two) alongside its original direct
-path. Currently wired for `MexicanHatKernel2D` only (the widest, and only
-two-component, kernel among dnfc's element types); `GaussKernel2D` and the 1D
-elements still use the direct path exclusively.
+path. Wired for all five 2D kernel elements (`GaussKernel2D`, `MexicanHatKernel2D`,
+`AsymmetricGaussKernel2D`, `OscillatoryKernel2D`, `CorrelatedNormalNoise2D`) since v2.9.5;
+the 1D elements still use the direct path exclusively.
 
 - **Dispatch rule, and how it was derived.** An element switches to the spectral
   path when `circular=true`, the grid is at least 100×100 (see next bullet), and the
@@ -105,8 +106,11 @@ elements still use the direct path exclusively.
   simply different realizations. Anyone who needs bit-comparable trajectories between the
   two paths for a noise-driven memory simulation should be aware of this and pin one path
   explicitly rather than rely on the automatic dispatch.
-- **License.** dnf-composer is GPL-3.0; FFTW is GPL-licensed — compatible, no new
-  restriction introduced.
+- **License.** dnf-composer is MIT-licensed; FFTW is GPL-licensed. FFTW being GPL-compatible
+  as an inbound dependency does not make this a non-issue: a binary that links FFTW is
+  subject to the GPL's distribution terms, which is a new restriction relative to
+  dnf-composer's own MIT license. See `.claude/reports/paper-vs-repository-reconciliation.md`
+  §B for the options.
 
 ## 3. Single machine; absolute numbers are not portable
 
@@ -174,7 +178,7 @@ integration) that the other frameworks don't provide.
 
 ## 6. Authorship and conflict of interest
 
-All seven benchmark drivers — dnfc's own, and the six competitor drivers for Cedar,
+All eight benchmark drivers — dnfc's own, and the seven competitor drivers for Cedar,
 Cosivina, and cosivina-python — were written by the dnfc author. dnfc is the author's own
 framework and is the fastest variant in every regime of both suites. No Cedar, Cosivina,
 or cosivina-python maintainer has reviewed these drivers for idiomaticity or fairness.

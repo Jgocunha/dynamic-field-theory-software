@@ -18,7 +18,7 @@ interpreted) scales differently with the number of grid points.
 | Release flags | `/O2 /Ob2 /DNDEBUG` (CMake Release) |
 | MATLAB version | R2024b, `maxNumCompThreads(1)` |
 | Python version | 3.11.9; numpy 2.2.1; numba 0.66.0 |
-| dnfc version | 2.9.3 |
+| dnfc version | 2.11.0 |
 | Cedar version | 6.2.0 — **both** convolution engines benchmarked: OpenCV (spatial) and FFTW (spectral); `cv::setNumThreads(0)` |
 | Cosivina version | 1.4.0 |
 | cosivina-python version | 0.1.0 (numba JIT, pure-NumPy, and spectral `KernelFFT` paths all benchmarked) |

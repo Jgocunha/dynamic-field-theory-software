@@ -11,7 +11,7 @@ This repository documents two independent studies comparing four implementations
 | [Cedar](https://github.com/cedar/cedar) | C++ | float32 | 6.2.0 |
 | [Cosivina](https://github.com/cosivina/cosivina) | MATLAB | float64 | 1.4.0 |
 | [cosivina-python](https://github.com/cosivina/cosivina_python) | Python / NumPy | float64 | 0.1.0 |
-| [dnf-composer](https://github.com/Jgocunha/dynamic-neural-field-composer) | C++ | float64 | 2.9.3 |
+| [dnf-composer](https://github.com/Jgocunha/dynamic-neural-field-composer) | C++ | float64 | 2.11.0 |
 
 All frameworks implement the 1D Amari equation:
 
@@ -23,22 +23,23 @@ All frameworks implement the 1D Amari equation:
 
 ## Implementation Differences
 
-The seven benchmarked variants differ in more than raw speed — each combines a different
+The eight benchmarked variants differ in more than raw speed — each combines a different
 convolution algorithm, SIMD mechanism, and threading model. These are framework
 characteristics, not benchmark artifacts; see `TRADE_OFF_CAVEATS.md` for how each is
 controlled for or disclosed.
 
 | Variant | Language | Precision | Convolution | SIMD mechanism | Threading control | Per-step overhead |
 |---|---|---|---|---|---|---|
-| dnfc | C++ | float64 | Hybrid: direct spatial (truncated kernel, hand-written AVX2+FMA) below a tap-count threshold, FFTW spectral (full field) above it — currently wired for `MexicanHatKernel2D` only, circular boundaries only, grid ≥ 100×100 | Compile-time `/arch:AVX2` (+ runtime `cpuid` fallback for non-AVX2 CPUs); FFTW selects its own SIMD codelets at runtime | No thread pool (single-threaded by construction); env vars pinned defensively | Flat element-handle loop, no locking |
+| dnfc | C++ | float64 | Hybrid: direct spatial (truncated kernel, hand-written AVX2+FMA) below a tap-count threshold, FFTW spectral (full field) above it — wired for all five 2D kernel elements (`GaussKernel2D`, `MexicanHatKernel2D`, `AsymmetricGaussKernel2D`, `OscillatoryKernel2D`, `CorrelatedNormalNoise2D`) since v2.9.5, circular boundaries only, grid ≥ 100×100 | Compile-time `/arch:AVX2` (+ runtime `cpuid` fallback for non-AVX2 CPUs); FFTW selects its own SIMD codelets at runtime | No thread pool (single-threaded by construction); env vars pinned defensively | Flat element-handle loop, no locking |
 | Cedar (OpenCV engine) | C++ | float32 | Direct spatial, truncated kernel (`cv::filter2D`) | Cedar's own code has no arch flag; OpenCV dispatches AVX2/AVX-512 at runtime via `cpuid` | `cv::setNumThreads(0)` | Qt read/write locks, `onTrigger` dispatch, `copyMakeBorder` allocation |
 | Cedar (FFTW engine) | C++ | float32 | Spectral, full field (FFT × FFT → inverse FFT) | FFTW selects SIMD codelets at runtime | `cv::setNumThreads(0)` | Same Cedar structural tax as OpenCV engine |
 | Cosivina (MATLAB) | MATLAB | float64 | Direct spatial, truncated kernel (`conv2`) | MATLAB's bundled vendor BLAS, runtime-dispatched | `maxNumCompThreads(1)` | Interpreted per-step loop overhead |
+| Cosivina (MATLAB, FFT) | MATLAB | float64 | Spectral, full untruncated field (`KernelFFT`) | MATLAB's bundled vendor BLAS/FFT, runtime-dispatched | `maxNumCompThreads(1)` | Interpreted per-step loop overhead |
 | cosivina-python (numba) | Python | float64 | Direct spatial, truncated kernel (`np.convolve`/`parCircConv`) | numba JIT via LLVM, host-CPU-targeted (AVX2 on this machine) | Six `*_NUM_THREADS=1` env vars | Per-element jitclass dispatch |
 | cosivina-python (nonumba) | Python | float64 | Direct spatial, truncated kernel, pure NumPy | NumPy/BLAS, runtime-dispatched | Six `*_NUM_THREADS=1` env vars | Per-element pure-Python dispatch |
 | cosivina-python (fft) | Python | float64 | Spectral, full untruncated field (`KernelFFT`, `rfft2`/`irfft2`) | NumPy FFT (pocketfft), runtime-dispatched; no numba implementation exists | Six `*_NUM_THREADS=1` env vars | Per-element pure-Python dispatch |
 
-All seven use the identical logistic-sigmoid activation (β=100) in the throughput
+All eight use the identical logistic-sigmoid activation (β=100) in the throughput
 benchmark — Cedar's is its stock `ExpSigmoid` class, config-selected to override its
 factory-default `AbsSigmoid`. See `cross-platform-validation/README.md` §2.4 for the
 full activation-function equivalence table across frameworks.
@@ -61,9 +62,9 @@ full activation-function equivalence table across frameworks.
 Each benchmark creates N independent neural fields (N ∈ {5, 10, 50, 100}), across 4 canonical
 regimes (detection, selection, memory, multi-peak) and 3 field sizes, and measures wall-clock steps
 per second (median of 10 runs × 500 steps each). The five spatial variants convolve the same real
-kernel support and all variants use matched activation functions (the two spectral variants —
-Cedar-FFTW and cosivina-python-FFT — convolve the full field in the Fourier domain; see
-`TRADE_OFF_CAVEATS.md` and `benchmarking/README.md` *Benchmark Design* for how).
+kernel support and all variants use matched activation functions (the three spectral variants —
+Cedar-FFTW, Cosivina (MATLAB, FFT), and cosivina-python-FFT — convolve the full field in the
+Fourier domain; see `TRADE_OFF_CAVEATS.md` and `benchmarking/README.md` *Benchmark Design* for how).
 
 ### Steps per second at N=100 (median across regimes' range)
 

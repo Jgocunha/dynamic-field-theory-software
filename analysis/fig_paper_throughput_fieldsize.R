@@ -40,14 +40,32 @@ ROOT <- normalizePath(file.path(HERE, ".."))
 
 # -- Font: EB Garamond, loaded directly from file (font-enumeration APIs
 # crash on this machine's font cache; font_add() with explicit paths sidesteps
-# that entirely). --------------------------------------------------------
+# that entirely). Falls back to the system default serif font if EB Garamond
+# isn't installed on this machine (the ttf files are user-specific, not
+# bundled in the repo). --------------------------------------------------
 
-FONT_DIR <- "C:/Users/jgocunha/AppData/Local/Microsoft/Windows/Fonts"
-font_add(
-  family  = "EB Garamond",
-  regular = file.path(FONT_DIR, "EBGaramond-VariableFont_wght.ttf"),
-  bold    = file.path(FONT_DIR, "EBGaramond-SemiBold.ttf")
+FONT_CANDIDATES <- c(
+  "C:/Users/jgocunha/AppData/Local/Microsoft/Windows/Fonts",
+  file.path(Sys.getenv("LOCALAPPDATA"), "Microsoft/Windows/Fonts"),
+  file.path(Sys.getenv("WINDIR"), "Fonts")
 )
+FONT_DIR <- Filter(function(d) {
+  nzchar(d) &&
+    file.exists(file.path(d, "EBGaramond-VariableFont_wght.ttf")) &&
+    file.exists(file.path(d, "EBGaramond-SemiBold.ttf"))
+}, FONT_CANDIDATES)
+
+if (length(FONT_DIR) > 0) {
+  FONT_FAMILY <- "EB Garamond"
+  font_add(
+    family  = FONT_FAMILY,
+    regular = file.path(FONT_DIR[1], "EBGaramond-VariableFont_wght.ttf"),
+    bold    = file.path(FONT_DIR[1], "EBGaramond-SemiBold.ttf")
+  )
+} else {
+  FONT_FAMILY <- "serif"
+  message("EB Garamond not found in any known font directory; falling back to '", FONT_FAMILY, "'.")
+}
 showtext_auto()
 showtext_opts(dpi = 300)
 
@@ -132,7 +150,7 @@ p <- ggplot(throughput_df, aes(x = N, y = mean_sps, colour = fwv, group = fwv)) 
   scale_x_log10(breaks = c(5, 10, 50, 100)) +
   scale_y_log10(labels = label_comma(accuracy = 1)) +
   labs(x = "Number of independent neural fields (N)", y = "Simulation steps per second") +
-  theme_minimal(base_family = "EB Garamond", base_size = 12) +
+  theme_minimal(base_family = FONT_FAMILY, base_size = 12) +
   theme(
     axis.text           = element_text(size = 8.5),
     axis.title          = element_text(size = 11),
