@@ -1,6 +1,6 @@
 # DFT Framework Benchmark Report (1D)
 
-Throughput (steps/second) of **N independent 1D neural fields** across seven framework
+Throughput (steps/second) of **N independent 1D neural fields** across eight framework
 variants, swept over four canonical DFT regimes and three field sizes. The 2D
 counterpart lives in [`../benchmarking-2d/`](../benchmarking-2d/).
 
@@ -37,11 +37,11 @@ was applied (single-threaded workloads do not require it).
 Each run creates **N independent neural fields** (N ∈ {5, 10, 50, 100}), tiled copies of one
 **canonical DFT regime**, and times the integration loop. The matrix is fully crossed:
 
-**7 variants × 4 regimes × 3 field sizes × 4 N × 10 runs.**
+**8 variants × 4 regimes × 3 field sizes × 4 N × 10 runs.**
 
 | Axis | Values |
 |---|---|
-| Framework variants | dnfc · Cedar (OpenCV) · Cedar (FFTW) · Cosivina (MATLAB) · cosivina-python (numba) · cosivina-python (NumPy) · cosivina-python (FFT) |
+| Framework variants | dnfc · Cedar (OpenCV) · Cedar (FFTW) · Cosivina (MATLAB) · Cosivina (MATLAB, FFT) · cosivina-python (numba) · cosivina-python (NumPy) · cosivina-python (FFT) |
 | Canonical regimes | detection · selection · memory · multi-peak |
 | Field size (1D) | 100, 500, 1000 cells |
 | N (independent fields) | 5, 10, 50, 100 |
@@ -95,7 +95,7 @@ See [`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) for the full set of tra
 ## Results
 
 Measured at the fair protocol described above: matched kernel tap count, matched activation
-function, two-phase memory. All seven variants, all four regimes, all three field sizes.
+function, two-phase memory. All eight variants, all four regimes, all three field sizes.
 
 ![Throughput](fig_benchmark_throughput.png)
 
@@ -106,57 +106,63 @@ function, two-phase memory. All seven variants, all four regimes, all three fiel
 Columns are *regime @ field size*. Higher is faster. See `data/benchmark_summary.csv` for per-cell
 mean, SD, and 95% CI.
 
-| Framework (variant) | det@100 | det@500 | sel@100 | sel@500 | mem@100 | mem@500 | mp@100 | mp@500 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| **dnfc** (C++, float64) | 7 875 | 1 746 | 7 641 | 1 673 | 6 735 | 1 527 | 7 884 | 1 711 |
-| cosivina-python (numba) | 1 597 | 459 | 1 429 | 459 | 1 330 | 384 | 1 579 | 487 |
-| Cedar (FFTW, float32) | 988 | 481 | 984 | 480 | 1 112 | 678 | 998 | 283 |
-| cosivina-python (NumPy) | 511 | 289 | 431 | 257 | 450 | 294 | 491 | 307 |
-| cosivina-python (FFT) | 308 | 213 | 306 | 212 | 329 | 240 | 296 | 212 |
-| Cedar (OpenCV, float32) | 556 | 207 | 552 | 204 | 202 | 73 | 684 | 253 |
-| Cosivina (MATLAB) | 195 | 142 | 173 | 125 | 179 | 118 | 179 | 129 |
+| Framework (variant) | det@100 | det@500 | det@1000 | sel@100 | sel@500 | sel@1000 | mem@100 | mem@500 | mem@1000 | mp@100 | mp@500 | mp@1000 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **dnfc** (C++, float64) | 10 629 | 2 367 | 1 240 | 9 141 | 2 208 | 1 083 | 8 695 | 1 921 | 1 028 | 10 027 | 2 351 | 1 232 |
+| cosivina-python (numba) | 1 546 | 467 | 251 | 1 506 | 456 | 238 | 1 343 | 393 | 193 | 1 591 | 487 | 260 |
+| Cedar (FFTW, float32) | 993 | 485 | 297 | 987 | 479 | 299 | 1 122 | 680 | 455 | 1 016 | 484 | 299 |
+| Cosivina (MATLAB, FFT) | 864 | 513 | 340 | 755 | 461 | 314 | 810 | 433 | 278 | 769 | 473 | 322 |
+| cosivina-python (NumPy) | 494 | 276 | 172 | 435 | 248 | 168 | 474 | 288 | 195 | 518 | 288 | 192 |
+| cosivina-python (FFT) | 312 | 201 | 140 | 311 | 201 | 142 | 331 | 227 | 170 | 309 | 200 | 145 |
+| Cedar (OpenCV, float32) | 564 | 204 | 114 | 555 | 202 | 113 | 201 | 73 | 41 | 676 | 250 | 140 |
+| Cosivina (MATLAB) | 867 | 478 | 317 | 736 | 427 | 291 | 716 | 348 | 216 | 778 | 458 | 316 |
 
 ### Table 2 — Speedup relative to Cosivina (MATLAB), averaged across regimes at N=100
 
-| Framework (variant) | field=100 | field=500 |
-|---|---:|---:|
-| dnfc | 41.6× (38–44×) | 13.0× (12–13×) |
-| cosivina-python (numba) | 8.2× (7.4–8.8×) | 3.5× (3.2–3.8×) |
-| Cedar (FFTW) | 5.6× (5.1–6.2×) | 3.8× (2.2–5.8×) |
-| cosivina-python (NumPy) | 2.6× (2.5–2.8×) | 2.2× (2.0–2.5×) |
-| cosivina-python (FFT) | 1.7× (1.6–1.8×) | 1.7× (1.5–2.0×) |
-| Cedar (OpenCV) | 2.8× (1.1–3.8×) | 1.4× (0.6–2.0×) |
-| Cosivina (MATLAB) | 1.0× | 1.0× |
+| Framework (variant) | field=100 | field=500 | field=1000 |
+|---|---:|---:|---:|
+| dnfc | 12.4× (12.1–12.9×) | 5.2× (5.0–5.5×) | 4.1× (3.7–4.8×) |
+| cosivina-python (numba) | 1.9× (1.8–2.0×) | 1.1× (1.0–1.1×) | 0.8× (0.8–0.9×) |
+| Cedar (FFTW) | 1.3× (1.1–1.6×) | 1.3× (1.0–2.0×) | 1.3× (0.9–2.1×) |
+| Cosivina (MATLAB, FFT) | 1.0× (1.0–1.1×) | 1.1× (1.0–1.2×) | 1.1× (1.0–1.3×) |
+| cosivina-python (NumPy) | 0.6× (0.6–0.7×) | 0.7× (0.6–0.8×) | 0.7× (0.5–0.9×) |
+| cosivina-python (FFT) | 0.4× (0.4–0.5×) | 0.5× (0.4–0.7×) | 0.5× (0.4–0.8×) |
+| Cedar (OpenCV) | 0.6× (0.3–0.9×) | 0.4× (0.2–0.5×) | 0.3× (0.2–0.4×) |
+| Cosivina (MATLAB) | 1.0× | 1.0× | 1.0× |
 
 ---
 
 ## Key observations
 
-- **dnfc is the fastest by a wide margin** in every regime and at both field sizes — 38–44× Cosivina
-  at field=100, 12–13× at field=500.
+- **dnfc is the fastest by a wide margin** in every regime and at all three field sizes — 12.1–12.9×
+  Cosivina at field=100, 5.0–5.5× at field=500, 3.7–4.8× at field=1000.
 
-- **Second place is cosivina-python (numba)** at both field sizes — its numba-JIT-compiled
-  host code over direct spatial convolution (`np.convolve` / `parCircConv`, the same truncated
-  kernel support dnfc uses) holds up well as the field grows.
+- **Second place is field-size-dependent.** cosivina-python (numba) holds second at field=100 — its
+  numba-JIT-compiled host code over direct spatial convolution (`np.convolve` / `parCircConv`, the
+  same truncated kernel support dnfc uses) is fastest there — but Cedar-FFTW overtakes it at field=500
+  and field=1000, where the spectral engine's flat per-step FFT cost scales better than numba's
+  per-element JIT-dispatch overhead on the larger fields.
 
 - **Cedar-FFTW vs Cedar-OpenCV** (a clean *same-precision, same-framework* comparison): FFTW wins on
-  the convolution-heavy **memory** (Mexican-hat) regime at both field sizes (e.g. memory@500: 659 vs
-  71 sps) — its fused Fourier-domain multiply avoids the second spatial convolution OpenCV pays for.
-  OpenCV is closer on the narrow-kernel regimes.
+  the convolution-heavy **memory** (Mexican-hat) regime at all three field sizes, and the margin
+  widens with size — memory@100: 1 122 vs 201 sps (5.6×); memory@500: 680 vs 73 (9.3×); memory@1000:
+  455 vs 41 (11.2×) — its fused Fourier-domain multiply avoids the second spatial convolution OpenCV
+  pays for. OpenCV is closer on the narrow-kernel regimes.
 
 - **cosivina-python (FFT)** is the slowest of the three cosivina-python paths in 1D (numba > NumPy >
-  FFT: ~300 sps at field=100 vs NumPy's ~450–510 and numba's ~1330–1600). Its spectral `KernelFFT`
+  FFT: ~310 sps at field=100 vs NumPy's ~435–520 and numba's ~1340–1590). Its spectral `KernelFFT`
   pays a fixed per-step FFT overhead that dominates at these 1D field sizes, where the truncated
-  spatial kernel is cheap; the gap to NumPy narrows at field=500 and on the wide-kernel **memory**
-  regime (fft 240 vs NumPy 294), the direction where spectral scaling helps. It is included as the
-  honest *float64 spectral* data point — the cross-platform-validation study confirms it computes the
-  same result as the spatial variants, so this is a pure algorithm-cost comparison, not accuracy.
+  spatial kernel is cheap; the gap to NumPy narrows as the field grows (field=1000: FFT ~140–170 vs
+  NumPy ~168–195) and narrows further still on the wide-kernel **memory** regime at field=1000 (170
+  vs 195, the closest the two paths get). It is included as the honest *float64 spectral* data
+  point — the cross-platform-validation study confirms it computes the same result as the spatial
+  variants, so this is a pure algorithm-cost comparison, not accuracy.
 
 ---
 
 ## Data provenance
 
-All seven variants were measured on one machine (see *Test Machine* above); see
+All eight variants were measured on one machine (see *Test Machine* above); see
 [`../TRADE_OFF_CAVEATS.md`](../TRADE_OFF_CAVEATS.md) §3 for what single-machine measurement does
 and doesn't bound. Each `data/timings-*.csv` row is
 `framework,variant,arch,field_size,mode,N,run,steps_per_second` (8 columns). Regenerate all tables
@@ -167,4 +173,4 @@ and figures with `Rscript analysis.R` and `Rscript fig_benchmark.R`.
 | `data/timings-dnfc.csv` | dnfc | 480 |
 | `data/timings-cedar.csv` | OpenCV + FFTW | 960 |
 | `data/timings-cosivina-python.csv` | numba + NumPy + FFT | 1440 |
-| `data/timings-cosivina.csv` | Cosivina (MATLAB) | 960 |
+| `data/timings-cosivina.csv` | Cosivina (MATLAB) + Cosivina (MATLAB, FFT) | 960 |
