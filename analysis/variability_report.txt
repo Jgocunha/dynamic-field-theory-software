@@ -1,0 +1,141 @@
+Warning message:
+package 'readr' was built under R version 4.4.3 
+Script dir (HERE): C:/dev-files/dynamic-field-theory-software/analysis
+Repo root (ROOT):  C:\dev-files\dynamic-field-theory-software
+
+Loaded 7680 rows total
+Distinct configurations (fwv x arch x dim x field_size x N): 768
+Confirmed: every configuration has exactly 10 runs (matches manuscript claim of 10 runs/config).
+Run index range: 1..10
+t(0.975, 9) = 2.2622 (manuscript/task states 2.262)
+
+Note: timed-steps/warm-up protocol (500 timed steps, 200 warm-up) is set in the
+PowerShell drivers (run_1d_benchmark.ps1 / run_2d_benchmark.ps1) and hardcoded
+WARMUP_STEPS=200 in every runner with no CLI override. The compiled C++ defaults
+(TIMED_STEPS=2000, N_RUNS=5) are dead values, always overridden by the drivers -
+not reflected in this data (confirmed by the 10-runs-per-config check above).
+
+Wrote analysis/variability_per_config.csv (768 rows)
+
+Cross-check against benchmark_summary.csv: matched 768 / 768 configs
+Cross-check PASSED: median and 95% CI bounds match benchmark_summary.csv on all configs (tol 1e-6).
+
+============================================================
+X = max(pct) across all configurations
+============================================================
+X = 9.7%
+Configuration:
+       fwv      arch dim field_size N  n   median       sd ci_half      pct
+1 cosivina detection  1D        100 5 10 13696.83 1860.162 1330.68 9.715238
+
+============================================================
+Distribution of pct across all configurations
+============================================================
+median pct = 0.77%
+p90 pct    = 1.61%
+max pct    = 9.72%
+
+Top 10 configurations by pct:
+                       fwv       arch dim field_size  N      pct
+1                 cosivina  detection  1D        100  5 9.715238
+2  cosivina-python (numba)  detection  1D        100  5 9.170433
+3           cosivina (fft) multi-peak  1D       1000  5 7.098620
+4                 cosivina multi-peak  1D        100  5 7.024085
+5                 cosivina  detection  2D        100  5 6.406716
+6           cosivina (fft)  detection  2D        100  5 6.166248
+7                 cosivina     memory  1D       1000 50 6.102799
+8           cosivina (fft)  detection  1D        100  5 5.499620
+9  cosivina-python (numba)     memory  1D        100 10 4.633673
+10 cosivina-python (numba)  detection  1D        100 10 4.512427
+
+Max excluding the top value: 9.17% (configuration: fwv=cosivina-python (numba), arch=detection, dim=1D, field_size=100, N=5)
+Ratio of top pct to second-highest pct: 1.06x
+=> The maximum is NOT a clear isolated outlier (within 1.5x of the next-highest value).
+
+Wrote analysis/variability_regime_spread.csv (192 groups)
+
+============================================================
+Regime-spread comparison across 192 groups (fwv x dim x field_size x N)
+============================================================
+regime_spread median = 21.52%
+regime_spread min    = 0.59%
+
+--- Comparison 1 (as specified): max(pct) [CI half-width basis] vs regime_spread [range basis] ---
+Holds for 190 / 192 groups.
+COUNTEREXAMPLES (run-to-run pct >= regime spread):
+             fwv dim field_size  N max_pct_in_group regime_spread
+1   cedar (fftw)  2D        500 10        0.8698994     0.8221055
+2 cosivina (fft)  2D        200  5        3.8586109     3.4298214
+
+--- Comparison 2 (like-for-like): max(run_range) [range basis] vs regime_spread [range basis] ---
+Holds for 166 / 192 groups.
+COUNTEREXAMPLES (run-to-run range >= regime spread):
+                       fwv dim field_size   N max_run_range_in_group
+1             cedar (fftw)  2D        100   5               6.872940
+2             cedar (fftw)  2D        100  50               5.299587
+3             cedar (fftw)  2D        100 100               3.857766
+4             cedar (fftw)  2D        200 100               4.574872
+5             cedar (fftw)  2D        500   5               2.320925
+6             cedar (fftw)  2D        500  10               3.468736
+7             cedar (fftw)  2D        500 100               2.742230
+8                 cosivina  1D        100   5              39.867442
+9                 cosivina  1D        100  10              13.747023
+10          cosivina (fft)  1D        100   5              21.632625
+11          cosivina (fft)  1D        100  10              15.903504
+12          cosivina (fft)  1D       1000   5              33.694980
+13          cosivina (fft)  2D        100   5              27.536626
+14          cosivina (fft)  2D        100  10              11.364896
+15          cosivina (fft)  2D        200   5              15.748284
+16          cosivina (fft)  2D        200  10               5.177110
+17          cosivina (fft)  2D        200 100               3.933566
+18          cosivina (fft)  2D        500  10               6.045590
+19   cosivina-python (fft)  1D        100   5               7.493684
+20   cosivina-python (fft)  2D        100   5               7.782629
+21   cosivina-python (fft)  2D        100  50               6.242348
+22   cosivina-python (fft)  2D        100 100               5.390726
+23   cosivina-python (fft)  2D        200 100               4.768291
+24   cosivina-python (fft)  2D        500  10               4.893964
+25 cosivina-python (numba)  1D        100   5              46.122127
+26 cosivina-python (numba)  1D        100  10              22.408069
+   regime_spread
+1      5.2273803
+2      3.7921668
+3      2.5513620
+4      3.6975717
+5      0.5900709
+6      0.8221055
+7      2.2650057
+8     12.2725134
+9     12.9781970
+10     9.6071975
+11    13.9502846
+12    21.6447960
+13     9.2192019
+14     5.4077849
+15     3.4298214
+16     4.5130380
+17     3.7764848
+18     5.8837714
+19     7.0774085
+20     4.4331994
+21     1.8299882
+22     4.3730296
+23     1.8825301
+24     2.5151149
+25    13.6630932
+26    14.5798019
+
+============================================================
+Figure 5 ribbon source (analysis/fig_paper_throughput.R)
+============================================================
+Ribbon aggregation line(s):
+  L85: lo_sps   = min(median_sps),
+Ribbon geom line(s):
+  L136: geom_ribbon(aes(ymin = lo_sps, ymax = hi_sps, fill = fwv), alpha = 0.12, colour = NA) +
+
+Conclusion: the ribbon is min/max of median_sps (per-config median over 10 runs)
+ACROSS THE 4 REGIMES within group_by(fwv, N), at fixed field_size and mode=='headless'.
+It is NOT a run-level CI, NOT sd, NOT computed from raw per-run data - run-to-run
+variability is fully collapsed away before the ribbon is computed (n=4 regimes, not n=10 runs).
+
+Analysis complete.
